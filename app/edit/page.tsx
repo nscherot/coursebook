@@ -194,11 +194,20 @@ function Editor(props: any) {
       setMsg(`Selected ${c.name} — pin set from the course database.`);
       return;
     }
-    // No coordinates from the API: geocode the full address for the map pin.
+    // No coordinates from the API: geocode for the map pin, trying several phrasings.
     setGeoBusy(true);
-    const hit =
-      (c.address && (await geocodeQuery(c.address))) ||
-      (await geocodeQuery(`${c.name} ${c.location || ""}`));
+    const baseName = c.name.replace(/\s*\(.*\)$/, ""); // "Club (Course No. 1)" -> "Club"
+    const candidates = [
+      c.address,
+      `${baseName}, ${c.location || ""}`,
+      baseName,
+      c.location,
+    ].filter((s: string | undefined) => s && s.trim().length > 3);
+    let hit: { lat: string; lng: string; label: string } | null = null;
+    for (const q of candidates) {
+      hit = await geocodeQuery(q as string);
+      if (hit) break;
+    }
     if (hit) {
       setNewLat(hit.lat);
       setNewLng(hit.lng);
