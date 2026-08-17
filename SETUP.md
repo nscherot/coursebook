@@ -53,3 +53,13 @@ This makes the emailed sign-in links point to your real site.
 - **A custom domain** (like coursebook.golf) can be attached later in Vercel → Settings → Domains for the cost of the domain itself.
 - **Updating the code:** any file you change in the GitHub repo redeploys the site automatically. Ask Claude for new features and upload the changed files the same way.
 - **Free-tier limits:** Supabase free tier includes 500 MB database + 1 GB file storage — thousands of scorecard photos. Vercel's free tier easily covers a hobby site.
+
+## Course database search (golfcourseapi.com)
+
+The "Add a course" form can search a database of ~30,000 courses. To turn it on:
+
+1. Sign in at golfcourseapi.com and copy your API key.
+2. In Vercel: Project -> Settings -> Environment Variables -> Add: Name `GOLF_COURSE_API_KEY`, Value = your key (all environments). This stays server-side — visitors never see it.
+3. Redeploy (Vercel prompts you, or push any commit).
+
+Without the key the form quietly falls back to manual entry + OpenStreetMap lookup. Note the free tier allows 50 searches/day across all users — searches only run when someone clicks Search, and identical searches are cached for a day.

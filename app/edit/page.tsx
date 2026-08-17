@@ -120,26 +120,91 @@ function Editor(props: any) {
   const [newLng, setNewLng] = useState<string>("");
   const [geoBusy, setGeoBusy] = useState(false);
   const [addBusy, setAddBusy] = useState(false);
+  const [dbResults, setDbResults] = useState<any[] | null>(null);
+  const [dbBusy, setDbBusy] = useState(false);
+  const [dbConfigured, setDbConfigured] = useState(true);
 
-  async function geocode() {
-    const q = `${newName} ${newLoc}`.trim();
-    if (!q) return;
-    setGeoBusy(true);
-    setMsg("");
+  async function geocodeQuery(q: string): Promise<{ lat: string; lng: string; label: string } | null> {
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`
       );
       const results = await res.json();
       if (results.length > 0) {
-        setNewLat(Number(results[0].lat).toFixed(5));
-        setNewLng(Number(results[0].lon).toFixed(5));
-        setMsg(`Pinned near: ${results[0].display_name}`);
-      } else {
-        setMsg("No match found — try adding the town/state, or type coordinates manually.");
+        return {
+          lat: Number(results[0].lat).toFixed(5),
+          lng: Number(results[0].lon).toFixed(5),
+          label: results[0].display_name,
+        };
       }
     } catch {
-      setMsg("Location lookup failed — you can type coordinates manually.");
+      /* fall through */
+    }
+    return null;
+  }
+
+  async function geocode() {
+    const q = `${newName} ${newLoc}`.trim();
+    if (!q) return;
+    setGeoBusy(true);
+    setMsg("");
+    const hit = await geocodeQuery(q);
+    if (hit) {
+      setNewLat(hit.lat);
+      setNewLng(hit.lng);
+      setMsg(`Pinned near: ${hit.label}`);
+    } else {
+      setMsg("No match found — try adding the town/state, or type coordinates manually.");
+    }
+    setGeoBusy(false);
+  }
+
+  async function searchDb() {
+    const q = newName.trim();
+    if (q.length < 2) return;
+    setDbBusy(true);
+    setMsg("");
+    setDbResults(null);
+    try {
+      const res = await fetch(`/api/courses/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (!data.configured) {
+        setDbConfigured(false);
+        setMsg("Course database isn't connected yet (no API key) — use Find on map instead.");
+      } else if (data.error) {
+        setMsg(`${data.error} — you can still add the course manually.`);
+      } else if (data.courses.length === 0) {
+        setMsg("No matches in the course database — add it manually below.");
+      } else {
+        setDbResults(data.courses);
+      }
+    } catch {
+      setMsg("Search failed — you can still add the course manually.");
+    }
+    setDbBusy(false);
+  }
+
+  async function pickDbCourse(c: any) {
+    setNewName(c.name);
+    setNewLoc(c.location || "");
+    setDbResults(null);
+    if (c.lat != null && c.lng != null) {
+      setNewLat(String(c.lat));
+      setNewLng(String(c.lng));
+      setMsg(`Selected ${c.name} — pin set from the course database.`);
+      return;
+    }
+    // No coordinates from the API: geocode the full address for the map pin.
+    setGeoBusy(true);
+    const hit =
+      (c.address && (await geocodeQuery(c.address))) ||
+      (await geocodeQuery(`${c.name} ${c.location || ""}`));
+    if (hit) {
+      setNewLat(hit.lat);
+      setNewLng(hit.lng);
+      setMsg(`Selected ${c.name} — pinned near ${hit.label}`);
+    } else {
+      setMsg(`Selected ${c.name} — couldn't find map coordinates automatically; use Find on map or type them.`);
     }
     setGeoBusy(false);
   }
@@ -277,13 +342,46 @@ function Editor(props: any) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
                 <label className="field">Course name</label>
-                <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Cypress Point Club" />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); if (dbConfigured) searchDb(); }
+                    }}
+                    placeholder="Cypress Point Club"
+                  />
+                  {dbConfigured && (
+                    <button type="button" className="btn btn-small" style={{ flex: "none" }} onClick={searchDb} disabled={dbBusy || newName.trim().length < 2}>
+                      {dbBusy ? "Searching…" : "🔎 Search"}
+                    </button>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="field">Town / state / country</label>
                 <input className="input" value={newLoc} onChange={(e) => setNewLoc(e.target.value)} placeholder="Pebble Beach, California" />
               </div>
             </div>
+            {dbResults && dbResults.length > 0 && (
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                {dbResults.map((c: any, i: number) => (
+                  <div
+                    key={c.id ?? i}
+                    className="course-row clickable"
+                    style={{ padding: "9px 14px" }}
+                    onClick={() => pickDbCourse(c)}
+                  >
+                    <div className="course-main">
+                      <div className="course-name" style={{ fontSize: 14 }}>{c.name}</div>
+                      <div className="course-loc">{c.location || c.address || ""}</div>
+                    </div>
+                    <span className="small" style={{ color: "var(--accent)", flex: "none" }}>Use this ↩</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
               <button type="button" className="btn btn-small" onClick={geocode} disabled={geoBusy}>
                 {geoBusy ? "Looking up…" : "📍 Find on map"}
@@ -301,8 +399,10 @@ function Editor(props: any) {
               </button>
             </div>
             <div className="small muted">
-              &ldquo;Find on map&rdquo; uses OpenStreetMap search — it gets most courses; nudge the
-              numbers if the pin is off. New courses land at the bottom; use the arrows to move them up.
+              {dbConfigured
+                ? "Type a course name and hit Search to pull it from a database of ~30,000 courses — name, location, and map pin fill in automatically. "
+                : "“Find on map” uses OpenStreetMap search — it gets most courses; nudge the numbers if the pin is off. "}
+              New courses land at the bottom; use the arrows to move them up.
             </div>
           </form>
         </div>
