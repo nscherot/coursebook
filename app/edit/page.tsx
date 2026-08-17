@@ -195,18 +195,29 @@ function Editor(props: any) {
       return;
     }
     // No coordinates from the API: geocode for the map pin, trying several phrasings.
+    // A course-name match is only trusted if it lands near the course's town —
+    // otherwise a same-named course elsewhere could hijack the pin.
     setGeoBusy(true);
     const baseName = c.name.replace(/\s*\(.*\)$/, ""); // "Club (Course No. 1)" -> "Club"
+    const town = (c.location || "").split(",")[0].trim();
+    const townHit = c.location ? await geocodeQuery(c.location) : null;
+    const nearTown = (h: { lat: string; lng: string }) =>
+      !townHit ||
+      (Math.abs(Number(h.lat) - Number(townHit.lat)) < 1.0 &&
+        Math.abs(Number(h.lng) - Number(townHit.lng)) < 1.0);
     const candidates = [
       c.address,
       `${baseName}, ${c.location || ""}`,
+      town ? `${baseName}, ${town}` : "",
       baseName,
-      c.location,
     ].filter((s: string | undefined) => s && s.trim().length > 3);
     let hit: { lat: string; lng: string; label: string } | null = null;
     for (const q of candidates) {
-      hit = await geocodeQuery(q as string);
-      if (hit) break;
+      const h = await geocodeQuery(q as string);
+      if (h && nearTown(h)) { hit = h; break; }
+    }
+    if (!hit && townHit) {
+      hit = { ...townHit, label: `${townHit.label} (town center — nudge the pin if needed)` };
     }
     if (hit) {
       setNewLat(hit.lat);
@@ -278,14 +289,39 @@ function Editor(props: any) {
   }
 
   /* ----- rounds ----- */
+  // iPhone photos are often HEIC (even when renamed .png/.jpg) — browsers can't
+  // display those, so sniff the real format and convert to JPEG when needed.
+  async function normalizePhoto(file: File): Promise<{ blob: Blob; ext: string; converted: boolean } | null> {
+    const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    const sig = String.fromCharCode.apply(null, Array.from(head.slice(4, 12)));
+    const isHeic = /ftyp(heic|heix|hevc|heim|heis|hevm|hevs|mif1|msf1)/.test("ftyp" + sig.slice(4));
+    if (!isHeic) {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      return { blob: file, ext: ["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ? ext : "jpg", converted: false };
+    }
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const out = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      return { blob: Array.isArray(out) ? out[0] : (out as Blob), ext: "jpg", converted: true };
+    } catch {
+      return null;
+    }
+  }
+
   async function addRound(entry: Entry, form: { date: string; score: string; notes: string; file: File | null }) {
     let scorecard_path: string | null = null;
     if (form.file) {
-      const ext = (form.file.name.split(".").pop() || "jpg").toLowerCase();
-      const path = `${profile.id}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("scorecards").upload(path, form.file, {
+      const photo = await normalizePhoto(form.file);
+      if (!photo) {
+        setMsg("Couldn't read that photo — it may be an iPhone HEIC file. Open it in Preview and use File → Export → JPEG, then upload that.");
+        return false;
+      }
+      if (photo.converted) setMsg("Converted your iPhone photo to JPEG automatically.");
+      const path = `${profile.id}/${crypto.randomUUID()}.${photo.ext}`;
+      const { error: upErr } = await supabase.storage.from("scorecards").upload(path, photo.blob, {
         cacheControl: "31536000",
         upsert: false,
+        contentType: photo.ext === "png" ? "image/png" : photo.ext === "webp" ? "image/webp" : photo.ext === "gif" ? "image/gif" : "image/jpeg",
       });
       if (upErr) {
         setMsg(`Scorecard upload failed: ${upErr.message}`);
@@ -533,7 +569,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
             </div>
             <div style={{ flex: "1 1 170px" }}>
               <label className="field">Scorecard photo</label>
-              <input className="input" type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+              <input className="input" type="file" accept="image/*,.heic,.heif" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             </div>
             <button className="btn btn-primary btn-small" disabled={busy}>{busy ? "Saving…" : "Log round"}</button>
           </form>
