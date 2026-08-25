@@ -2,11 +2,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/supabase/client";
+import PasteImport from "@/components/PasteImport";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const supabase = getBrowserClient();
   const [userId, setUserId] = useState<string | null>(null);
+  const [importStep, setImportStep] = useState(false);
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [listTitle, setListTitle] = useState("My Top 25 Golf Courses");
@@ -57,7 +59,28 @@ export default function OnboardingPage() {
       );
       return;
     }
-    router.replace("/edit");
+    setImportStep(true); // step 2: bring your existing list
+  }
+
+  if (importStep && userId) {
+    return (
+      <main className="container" style={{ paddingTop: 48 }}>
+        <div style={{ maxWidth: 640 }}>
+          <h1 style={{ fontSize: 24, margin: "0 0 4px" }}>You&rsquo;re in! One more thing…</h1>
+          <p className="small muted" style={{ margin: "0 0 14px" }}>
+            Already keep a list of courses you&rsquo;ve played? Paste it and it becomes your
+            ranked map in one step.
+          </p>
+          <PasteImport
+            supabase={supabase!}
+            profile={{ id: userId, list_size: listSize }}
+            existingCount={0}
+            onDone={() => router.replace("/edit")}
+            onSkip={() => router.replace("/edit")}
+          />
+        </div>
+      </main>
+    );
   }
 
   return (
