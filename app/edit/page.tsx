@@ -6,6 +6,7 @@ import { getBrowserClient, scorecardUrl } from "@/lib/supabase/client";
 import type { Entry, Profile, Round } from "@/lib/types";
 
 const CourseMap = dynamic(() => import("@/components/CourseMap"), { ssr: false });
+import PasteImport from "@/components/PasteImport";
 
 type Status = "loading" | "no-config" | "signed-out" | "no-profile" | "ready";
 
@@ -422,7 +423,16 @@ function Editor(props: any) {
       {msg && <p className="success-text" style={{ marginTop: 0 }}>{msg}</p>}
 
       {showSettings && <Settings supabase={supabase} profile={profile} onSaved={() => { setShowSettings(false); reload(); }} />}
-      {showImport && <ImportBox supabase={supabase} profile={profile} existingCount={entries.length} onDone={() => { setShowImport(false); reload(); }} />}
+      {showImport && (
+        <div style={{ marginBottom: 16 }}>
+          <PasteImport
+            supabase={supabase}
+            profile={profile}
+            existingCount={entries.length}
+            onDone={() => { setShowImport(false); reload(); }}
+          />
+        </div>
+      )}
 
       <div className="list-layout">
         <div className="list-map">
@@ -699,68 +709,6 @@ function Settings({ supabase, profile, onSaved }: any) {
         }}>
         Save settings
       </button>
-    </div>
-  );
-}
-
-function ImportBox({ supabase, profile, existingCount, onDone }: any) {
-  const [text, setText] = useState("");
-  const [replace, setReplace] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <b>Import a list</b>
-      <p className="small muted" style={{ margin: "4px 0 10px" }}>
-        Paste a JSON array of courses: {"[{ \"rank\": 1, \"name\": \"…\", \"location\": \"…\", \"lat\": 40.9, \"lng\": -72.4, \"note\": \"\" }, …]"}
-      </p>
-      <textarea className="input" rows={5} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste JSON here" />
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-        <label className="small" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-          Replace my current list (otherwise appends)
-        </label>
-        {err && <span className="error-text">{err}</span>}
-        <div className="header-spacer" />
-        <button className="btn btn-primary btn-small" disabled={busy}
-          onClick={async () => {
-            setErr("");
-            let items: any[];
-            try {
-              items = JSON.parse(text);
-              if (!Array.isArray(items)) throw new Error();
-            } catch {
-              setErr("That doesn't look like a JSON array.");
-              return;
-            }
-            setBusy(true);
-            if (replace) await supabase.from("entries").delete().eq("user_id", profile.id);
-            const base = replace ? 0 : existingCount;
-            const rows = items
-              .sort((a, b) => (a.rank || 999) - (b.rank || 999))
-              .map((c, i) => ({
-                user_id: profile.id,
-                rank: base + i + 1,
-                name: String(c.name || "Unnamed course"),
-                location: String(c.location || ""),
-                lat: c.lat != null ? Number(c.lat) : null,
-                lng: c.lng != null ? Number(c.lng) : null,
-                note: String(c.note || ""),
-              }));
-            const { data: createdRows, error } = await supabase.from("entries").insert(rows).select("id");
-            // Every imported course counts as played — give each its first round.
-            if (!error && createdRows && createdRows.length > 0) {
-              await supabase.from("rounds").insert(
-                createdRows.map((r: any) => ({ user_id: profile.id, entry_id: r.id, notes: "" }))
-              );
-            }
-            setBusy(false);
-            if (error) setErr(error.message);
-            else onDone();
-          }}>
-          {busy ? "Importing…" : "Import"}
-        </button>
-      </div>
     </div>
   );
 }
