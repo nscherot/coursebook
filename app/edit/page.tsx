@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getBrowserClient, scorecardUrl } from "@/lib/supabase/client";
+import { SITE_NAME } from "@/lib/config";
 import type { Entry, Profile, Round } from "@/lib/types";
 
 const CourseMap = dynamic(() => import("@/components/CourseMap"), { ssr: false });
@@ -399,6 +400,49 @@ function Editor(props: any) {
     reload();
   }
 
+  // Build the 1080x1920 Instagram-Story card for a round and hand it to the
+  // native share sheet (phone) or download it (desktop).
+  async function shareRound(entry: Entry, r: Round) {
+    try {
+      setMsg("Building your story card…");
+      const { renderStoryCard } = await import("@/lib/storyCard");
+      const blob = await renderStoryCard({
+        rank: entry.rank,
+        listTitle: profile.list_title,
+        courseName: entry.name,
+        location: entry.location,
+        playedOn: r.played_on,
+        score: r.score,
+        photoUrl: scorecardUrl(r.scorecard_path),
+        siteName: SITE_NAME,
+      });
+      const file = new File([blob], "coursebook-story.png", { type: "image/png" });
+      const nav: any = navigator;
+      const downloadIt = () => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "coursebook-story.png";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        setMsg("Story card downloaded — AirDrop it to your phone or post from IG on desktop.");
+      };
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        try {
+          await nav.share({ files: [file], title: `${entry.name} — ${SITE_NAME}` });
+          setMsg("");
+        } catch (e: any) {
+          if (e?.name === "AbortError") setMsg("");
+          else downloadIt(); // share sheet refused (e.g. lost user-gesture) — fall back
+        }
+      } else {
+        downloadIt();
+      }
+    } catch {
+      setMsg("Couldn't build the share card — try again.");
+    }
+  }
+
   /* ----- settings / import ----- */
   const [showSettings, setShowSettings] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -537,6 +581,7 @@ function Editor(props: any) {
               onDelete={() => removeEntry(e)}
               onAddRound={(form: any) => addRound(e, form)}
               onDeleteRound={deleteRound}
+              onShareRound={(r: Round) => shareRound(e, r)}
             />
           ))}
           {entries.length === 0 && (
@@ -552,7 +597,7 @@ function Editor(props: any) {
 
 /* ---------------- entry row ---------------- */
 
-function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSaveNote, onDelete, onAddRound, onDeleteRound }: any) {
+function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSaveNote, onDelete, onAddRound, onDeleteRound, onShareRound }: any) {
   const [open, setOpen] = useState(false);
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
   const [date, setDate] = useState("");
@@ -619,6 +664,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
                     {r.scorecard_path && <ScorecardThumb path={r.scorecard_path} name={entry.name} />}
                   </>
                 )}
+                <a style={{ cursor: "pointer", color: "var(--accent)", fontSize: 12, fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
                 <a style={{ cursor: "pointer", color: "var(--danger)", fontSize: 12 }} onClick={() => onDeleteRound(r)}>delete</a>
               </div>
             );
