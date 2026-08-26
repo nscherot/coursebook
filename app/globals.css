@@ -219,3 +219,46 @@ label.field { display: block; font-size: 13px; color: var(--text-secondary); fon
   margin-top: 40px; padding: 16px 0 28px;
   color: var(--text-muted); font-size: 12.5px;
 }
+
+/* ---------- mobile optimization ---------- */
+
+.action-bar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.action-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.round-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-top: 10px; }
+.rowlink { cursor: pointer; font-size: 12px; }
+
+@media (max-width: 820px) {
+  /* 16px inputs stop iOS Safari's auto-zoom on focus */
+  .input, textarea.input, select.input { font-size: 16px; }
+
+  /* header: title stays put, buttons become a swipeable strip */
+  .action-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+    margin-left: -24px; margin-right: -24px;
+    padding-left: 24px; padding-right: 24px;
+  }
+  .action-strip::-webkit-scrollbar { display: none; }
+  .action-strip .btn { flex: none; }
+
+  /* comfortable tap targets */
+  .btn { padding: 10px 16px; }
+  .btn-small { padding: 9px 14px; font-size: 14px; }
+  .btn-icon { width: 36px; height: 36px; font-size: 16px; border-radius: 9px; }
+  .rowlink { font-size: 14px; padding: 6px 2px; display: inline-block; }
+
+  /* map takes ~38% of screen so the list is one flick away */
+  .edit-map-wrap > div:first-child { height: 38vh !important; }
+
+  /* forms stack full-width */
+  .form-grid { grid-template-columns: 1fr; }
+  .round-form > div { width: 100% !important; flex: 1 1 100% !important; }
+  .round-form button { width: 100%; padding: 12px; }
+
+  .course-row { padding: 12px 12px; gap: 10px; }
+  h1 { font-size: 24px; }
+}
