@@ -451,10 +451,11 @@ function Editor(props: any) {
 
   return (
     <main className="container" style={{ paddingTop: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+      <div className="action-bar">
         <h1 style={{ fontSize: 28, margin: 0 }}>{profile.list_title}</h1>
         <span className="chip">{entries.length} / {profile.list_size}</span>
-        <div className="header-spacer" />
+      </div>
+      <div className="action-strip">
         <a className="btn btn-small" href={`/u/${profile.username}`} target="_blank">View public page ↗</a>
         <button className="btn btn-small" onClick={() => { navigator.clipboard?.writeText(shareUrl); setMsg("Share link copied!"); }}>
           Copy share link
@@ -480,11 +481,13 @@ function Editor(props: any) {
 
       <div className="list-layout">
         <div className="list-map">
-          <CourseMap points={points} selectedId={selectedId} onSelect={setSelectedId} height="min(60vh, 560px)" />
+          <div className="edit-map-wrap">
+            <CourseMap points={points} selectedId={selectedId} onSelect={setSelectedId} height="min(60vh, 560px)" />
+          </div>
 
           <form className="card" onSubmit={addCourse} style={{ marginTop: 16, display: "grid", gap: 10 }}>
             <b>Add a course</b>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div className="form-grid">
               <div style={{ position: "relative" }}>
                 <label className="field">Course name</label>
                 <input
@@ -623,7 +626,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
           {noteEdit === null ? (
             <div className="course-note">
               {entry.note ? `“${entry.note}”` : <span className="muted">no note yet</span>}{" "}
-              <a onClick={(ev) => { ev.stopPropagation(); setNoteEdit(entry.note); }} style={{ cursor: "pointer", fontSize: 12 }}>edit</a>
+              <a className="rowlink" onClick={(ev) => { ev.stopPropagation(); setNoteEdit(entry.note); }}>edit</a>
             </div>
           ) : (
             <div onClick={(ev) => ev.stopPropagation()} style={{ marginTop: 6 }}>
@@ -638,12 +641,12 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
         <div style={{ textAlign: "right", flex: "none" }}>
           {bestScore != null && <div className="chip chip-score">best {bestScore}</div>}
           <div className="small" style={{ marginTop: 4 }}>
-            <a style={{ cursor: "pointer" }} onClick={() => setOpen(!open)}>
+            <a className="rowlink" onClick={() => setOpen(!open)}>
               {rounds.length} round{rounds.length === 1 ? "" : "s"} {open ? "▾" : "▸"}
             </a>
           </div>
           <div className="small" style={{ marginTop: 4 }}>
-            <a className="btn-danger" style={{ cursor: "pointer", color: "var(--danger)" }} onClick={onDelete}>remove</a>
+            <a className="rowlink" style={{ color: "var(--danger)" }} onClick={onDelete}>remove</a>
           </div>
         </div>
       </div>
@@ -664,8 +667,8 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
                     {r.scorecard_path && <ScorecardThumb path={r.scorecard_path} name={entry.name} />}
                   </>
                 )}
-                <a style={{ cursor: "pointer", color: "var(--accent)", fontSize: 12, fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
-                <a style={{ cursor: "pointer", color: "var(--danger)", fontSize: 12 }} onClick={() => onDeleteRound(r)}>delete</a>
+                <a className="rowlink" style={{ color: "var(--accent)", fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
+                <a className="rowlink" style={{ color: "var(--danger)" }} onClick={() => onDeleteRound(r)}>delete</a>
               </div>
             );
           })}
@@ -678,7 +681,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
               setBusy(false);
               if (ok) { setDate(""); setScore(""); setNotes(""); setFile(null); }
             }}
-            style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 10 }}
+            className="round-form"
           >
             <div style={{ width: 140 }}>
               <label className="field">Date played</label>
