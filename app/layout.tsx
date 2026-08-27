@@ -3,6 +3,7 @@ import "leaflet/dist/leaflet.css";
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { SITE_NAME, TAGLINE } from "@/lib/config";
+import HeaderAuth from "@/components/HeaderAuth";
 
 export const metadata: Metadata = {
   title: SITE_NAME,
@@ -35,8 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </Link>
             <div className="header-spacer" />
             <Link href="/demo" className="btn btn-small">Demo</Link>
-            <Link href="/edit" className="btn btn-small">My list</Link>
-            <Link href="/login" className="btn btn-small btn-primary">Sign in</Link>
+            <HeaderAuth />
           </div>
         </header>
         {children}
