@@ -156,13 +156,13 @@ export default function ProfilePage() {
                 <label className="field" htmlFor="firstName">First name</label>
                 <input id="firstName" className="input" value={firstName}
                   autoComplete="given-name"
-                  onChange={(e) => setFirstName(e.target.value)} placeholder="Nate" />
+                  onChange={(e) => setFirstName(e.target.value)} placeholder="First" />
               </div>
               <div>
                 <label className="field" htmlFor="lastName">Last name</label>
                 <input id="lastName" className="input" value={lastName}
                   autoComplete="family-name"
-                  onChange={(e) => setLastName(e.target.value)} placeholder="Scherotter" />
+                  onChange={(e) => setLastName(e.target.value)} placeholder="Last" />
               </div>
             </div>
 
@@ -170,14 +170,14 @@ export default function ProfilePage() {
               <label className="field" htmlFor="location">Location</label>
               <input id="location" className="input" value={location}
                 onChange={(e) => setLocation(e.target.value)}
-                placeholder="Boston, MA" />
+                placeholder="City, State" />
             </div>
 
             <div>
               <label className="field" htmlFor="homeCourse">Home course</label>
               <input id="homeCourse" className="input" value={homeCourse}
                 onChange={(e) => setHomeCourse(e.target.value)}
-                placeholder="Sugarloaf Golf Club" />
+                placeholder="Your home course" />
             </div>
 
             <div>
