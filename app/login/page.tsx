@@ -38,13 +38,35 @@ export default function LoginPage() {
   async function signInWithGoogle() {
     setGoogleBusy(true);
     setError("");
-    const { error } = await supabase!.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    });
-    // On success the browser navigates away; only errors land here.
-    if (error) {
-      setError(error.message);
+    try {
+      // Build the OAuth URL ourselves (skipBrowserRedirect) so we control the
+      // navigation, and give up after 12s instead of hanging on a slow auth
+      // service.
+      const result = await Promise.race([
+        supabase!.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${window.location.origin}/auth/callback`,
+            skipBrowserRedirect: true,
+          },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 12000)
+        ),
+      ]);
+      if (result.error) throw result.error;
+      if (result.data?.url) {
+        window.location.assign(result.data.url);
+        return; // navigating away
+      }
+      throw new Error("No sign-in URL returned");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(
+        msg === "timeout"
+          ? "Google sign-in is taking too long — the sign-in service may be having a hiccup. Try again in a minute, or use the email link below."
+          : msg
+      );
       setGoogleBusy(false);
     }
   }
