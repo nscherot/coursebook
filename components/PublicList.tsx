@@ -60,7 +60,7 @@ export default function PublicList({ title, ownerName, entries, roundsByEntry, d
 
       <div className="list-layout">
         <div className="list-map">
-          <CourseMap points={points} selectedId={selectedId} onSelect={select} height="min(70vh, 640px)" />
+          <CourseMap points={points} selectedId={selectedId} onSelect={select} height="100%" />
         </div>
         <div className="list-pane card" style={{ padding: 0, overflow: "hidden" }}>
           {entries.map((e) => {
@@ -76,7 +76,7 @@ export default function PublicList({ title, ownerName, entries, roundsByEntry, d
                     setExpanded((x) => ({ ...x, [e.id]: !isOpen }));
                   }}
                 >
-                  <div className="rank-badge">{e.rank}</div>
+                  <div className={`rank-badge${e.rank === 1 ? " rank-1" : ""}`}>{e.rank}</div>
                   <div className="course-main">
                     <div className="course-name">{e.name}</div>
                     <div className="course-loc">{e.location}</div>
