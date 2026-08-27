@@ -1,4 +1,4 @@
-# Loop Rank
+# Loop Ranks
 
 Rank the courses you've played. Prove it with the card.
 
