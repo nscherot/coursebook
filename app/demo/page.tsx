@@ -13,7 +13,7 @@ export default async function DemoPage() {
   if (supabase) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("id, username, display_name, list_title, list_size")
+      .select("*")
       .eq("username", DEMO_USERNAME)
       .maybeSingle();
 
@@ -42,6 +42,11 @@ export default async function DemoPage() {
         <PublicList
           title={profile.list_title}
           ownerName={profile.display_name || profile.username}
+          ownerMeta={{
+            location: profile.location,
+            home_course: profile.home_course,
+            handicap: profile.handicap,
+          }}
           entries={(entries || []) as Entry[]}
           roundsByEntry={roundsByEntry}
           demoBanner
