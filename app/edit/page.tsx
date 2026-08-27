@@ -622,7 +622,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
       <div className={`course-row ${active ? "active" : ""}`}>
         <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
           <button className="btn-icon" disabled={first} onClick={() => onMove(-1)} title="Move up">↑</button>
-          <div className="rank-badge">{entry.rank}</div>
+          <div className={`rank-badge${entry.rank === 1 ? " rank-1" : ""}`}>{entry.rank}</div>
           <button className="btn-icon" disabled={last} onClick={() => onMove(1)} title="Move down">↓</button>
         </div>
         <div className="course-main clickable" style={{ cursor: "pointer" }} onClick={() => { onSelect(); setOpen(!open); }}>
