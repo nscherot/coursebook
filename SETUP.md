@@ -1,4 +1,4 @@
-# Putting Loop Rank live — step by step
+# Putting Loop Ranks live — step by step
 
 You'll create three free accounts (GitHub, Supabase, Vercel). No coding needed; total time is about 30 minutes. When you're done you'll have a real website with sign-in, and it costs $0 on the free tiers.
 
