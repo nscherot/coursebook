@@ -2,6 +2,7 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import type { Entry, Round } from "@/lib/types";
+import { fmtDate } from "@/lib/format";
 
 const CourseMap = dynamic(() => import("./CourseMap"), { ssr: false });
 
@@ -91,30 +92,52 @@ export default function PublicList({ title, ownerName, entries, roundsByEntry, d
                 </div>
                 {isOpen && rounds.length > 0 && (
                   <div style={{ padding: "4px 16px 14px 60px" }}>
-                    {rounds.map((r) => (
-                      <div key={r.id} className="round-row">
-                        {!r.played_on && r.score == null && !r.notes && !r.scorecard_url ? (
-                          <span className="muted" style={{ fontStyle: "italic" }}>played</span>
-                        ) : null}
-                        {r.score != null && <span className="round-score">{r.score}</span>}
-                        {(r.played_on || r.score != null || r.notes || r.scorecard_url) && (
-                          <span className="muted">{r.played_on || "date unknown"}</span>
-                        )}
-                        {r.notes && <span>{r.notes}</span>}
-                        {r.scorecard_url && (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            src={r.scorecard_url}
-                            alt={`Scorecard from ${e.name}`}
-                            className="scorecard-thumb"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              setLightbox(r.scorecard_url);
-                            }}
-                          />
-                        )}
-                      </div>
-                    ))}
+                    {rounds.map((r) => {
+                      const blank = !r.played_on && r.score == null && !r.notes && !r.scorecard_url;
+                      return (
+                        <div key={r.id} className="round-card">
+                          {blank ? (
+                            <span className="muted" style={{ fontStyle: "italic" }}>played</span>
+                          ) : (
+                            <div className="round-body">
+                              <div className="round-stats" style={{ flex: "1 1 220px" }}>
+                                {r.score != null && (
+                                  <div className="round-stat">
+                                    <div className="round-stat-label">Score</div>
+                                    <div className="round-stat-value round-stat-score">{r.score}</div>
+                                  </div>
+                                )}
+                                <div className="round-stat">
+                                  <div className="round-stat-label">Date played</div>
+                                  <div className="round-stat-value">{r.played_on ? fmtDate(r.played_on) : "—"}</div>
+                                </div>
+                                {r.notes && (
+                                  <div className="round-stat">
+                                    <div className="round-stat-label">Highlight</div>
+                                    <div className="round-stat-value">{r.notes}</div>
+                                  </div>
+                                )}
+                              </div>
+                              {r.scorecard_url && (
+                                <div className="round-scorecard">
+                                  <div className="round-stat-label">Scorecard</div>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={r.scorecard_url}
+                                    alt={`Scorecard from ${e.name}`}
+                                    className="scorecard-thumb"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      setLightbox(r.scorecard_url);
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
