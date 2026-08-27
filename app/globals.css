@@ -267,6 +267,8 @@ label.field { display: block; font-size: 13px; color: var(--text-secondary); fon
 .list-layout { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 24px; align-items: start; }
 .list-map { position: sticky; top: 84px; height: calc(100vh - 130px); min-width: 0; }
 .list-pane { min-width: 0; }
+/* edit page's left column: map + add-course form, flows normally (not sticky) */
+.edit-left { min-width: 0; }
 @media (max-width: 880px) {
   .list-layout { grid-template-columns: 1fr; }
   .list-map { position: relative; top: 0; height: 400px; width: 100%; }
