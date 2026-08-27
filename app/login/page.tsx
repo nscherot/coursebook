@@ -1,16 +1,48 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getBrowserClient } from "@/lib/supabase/client";
-import { SITE_NAME } from "@/lib/config";
+import { SITE_NAME, GOOGLE_CLIENT_ID } from "@/lib/config";
 
 const EMAIL_KEY = "looprank-login-email";
+
+// Loads Google Identity Services once; resolves when window.google is ready.
+let gisPromise: Promise<void> | null = null;
+function loadGis(): Promise<void> {
+  if (gisPromise) return gisPromise;
+  gisPromise = new Promise((resolve, reject) => {
+    if ((window as any).google?.accounts?.id) return resolve();
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => {
+      gisPromise = null;
+      reject(new Error("Google sign-in failed to load"));
+    };
+    document.head.appendChild(s);
+  });
+  return gisPromise;
+}
+
+function genNonce(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [googleBusy, setGoogleBusy] = useState(false);
   const [error, setError] = useState("");
+  const [googleFailed, setGoogleFailed] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
   const supabase = getBrowserClient();
 
   // Pre-fill the last-used email so returning users don't retype it.
@@ -20,6 +52,70 @@ export default function LoginPage() {
       if (saved) setEmail(saved);
     } catch {}
   }, []);
+
+  // Google sign-in via Google Identity Services + signInWithIdToken.
+  // The token exchange happens on THIS page, so Google's consent UI shows
+  // Loop Ranks / loopranks.com — not the Supabase project domain.
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadGis();
+        if (cancelled || !googleBtnRef.current) return;
+        const nonce = genNonce();
+        const hashedNonce = await sha256Hex(nonce);
+        const g = (window as any).google;
+        g.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          nonce: hashedNonce,
+          use_fedcm_for_prompt: true,
+          callback: async (resp: { credential: string }) => {
+            setSigningIn(true);
+            setError("");
+            const { error } = await supabase!.auth.signInWithIdToken({
+              provider: "google",
+              token: resp.credential,
+              nonce,
+            });
+            if (error) {
+              setError(error.message);
+              setSigningIn(false);
+              return;
+            }
+            // New users go to onboarding, returning users to their list.
+            let dest = "/edit";
+            const { data: userData } = await supabase!.auth.getUser();
+            if (userData.user) {
+              const { data: profile } = await supabase!
+                .from("profiles")
+                .select("id")
+                .eq("id", userData.user.id)
+                .maybeSingle();
+              if (!profile) dest = "/onboarding";
+            }
+            window.location.assign(dest);
+          },
+        });
+        const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const width = Math.min(Math.round(googleBtnRef.current.offsetWidth) || 360, 400);
+        g.accounts.id.renderButton(googleBtnRef.current, {
+          type: "standard",
+          theme: dark ? "filled_black" : "outline",
+          text: "continue_with",
+          shape: "pill",
+          size: "large",
+          width,
+          logo_alignment: "left",
+        });
+      } catch {
+        if (!cancelled) setGoogleFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   if (!supabase) {
     return (
@@ -35,39 +131,17 @@ export default function LoginPage() {
     );
   }
 
-  async function signInWithGoogle() {
-    setGoogleBusy(true);
+  // Fallback if the Google script is blocked: classic redirect flow.
+  async function signInWithGoogleRedirect() {
+    setBusy(true);
     setError("");
-    try {
-      // Build the OAuth URL ourselves (skipBrowserRedirect) so we control the
-      // navigation, and give up after 12s instead of hanging on a slow auth
-      // service.
-      const result = await Promise.race([
-        supabase!.auth.signInWithOAuth({
-          provider: "google",
-          options: {
-            redirectTo: `${window.location.origin}/auth/callback`,
-            skipBrowserRedirect: true,
-          },
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), 12000)
-        ),
-      ]);
-      if (result.error) throw result.error;
-      if (result.data?.url) {
-        window.location.assign(result.data.url);
-        return; // navigating away
-      }
-      throw new Error("No sign-in URL returned");
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(
-        msg === "timeout"
-          ? "Google sign-in is taking too long — the sign-in service may be having a hiccup. Try again in a minute, or use the email link below."
-          : msg
-      );
-      setGoogleBusy(false);
+    const { error } = await supabase!.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) {
+      setError(error.message);
+      setBusy(false);
     }
   }
 
@@ -105,24 +179,26 @@ export default function LoginPage() {
           </p>
         ) : (
           <>
-            <button
-              type="button"
-              className="btn"
-              onClick={signInWithGoogle}
-              disabled={googleBusy}
-              style={{
-                width: "100%",
-                padding: "11px 16px",
-                fontWeight: 600,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-              }}
-            >
-              <GoogleLogo />
-              {googleBusy ? "Opening Google…" : "Continue with Google"}
-            </button>
+            {signingIn ? (
+              <p className="small muted" style={{ textAlign: "center", padding: "10px 0" }}>
+                Signing you in with Google…
+              </p>
+            ) : googleFailed ? (
+              <button
+                type="button"
+                className="btn"
+                onClick={signInWithGoogleRedirect}
+                disabled={busy}
+                style={{ width: "100%", padding: "11px 16px", fontWeight: 600 }}
+              >
+                Continue with Google
+              </button>
+            ) : (
+              <div
+                ref={googleBtnRef}
+                style={{ display: "flex", justifyContent: "center", minHeight: 44 }}
+              />
+            )}
 
             <div
               style={{
@@ -165,16 +241,5 @@ export default function LoginPage() {
         )}
       </div>
     </main>
-  );
-}
-
-function GoogleLogo() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-    </svg>
   );
 }
