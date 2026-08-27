@@ -608,6 +608,11 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  const onlyBlankRound =
+    rounds.length === 1 &&
+    !rounds[0].played_on && rounds[0].score == null && !rounds[0].notes && !rounds[0].scorecard_path;
 
   const best = rounds.map((r: Round) => r.score).filter((s: any) => s != null);
   const bestScore = best.length ? Math.min(...best) : null;
@@ -658,7 +663,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
             return (
               <div key={r.id} className="round-row">
                 {blank ? (
-                  <span className="muted" style={{ fontStyle: "italic" }}>played — add the date, score, or scorecard below</span>
+                  <span className="muted" style={{ fontStyle: "italic" }}>played — no details logged yet</span>
                 ) : (
                   <>
                     {r.score != null && <span className="round-score">{r.score}</span>}
@@ -673,13 +678,21 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
             );
           })}
 
+          {!showForm && (
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="btn btn-small" onClick={() => setShowForm(true)}>
+                ＋ {onlyBlankRound ? "Add round details" : "Add a new round"}
+              </button>
+            </div>
+          )}
+          {showForm && (
           <form
             onSubmit={async (e) => {
               e.preventDefault();
               setBusy(true);
               const ok = await onAddRound({ date, score, notes, file });
               setBusy(false);
-              if (ok) { setDate(""); setScore(""); setNotes(""); setFile(null); }
+              if (ok) { setDate(""); setScore(""); setNotes(""); setFile(null); setShowForm(false); }
             }}
             className="round-form"
           >
@@ -700,7 +713,9 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
               <input className="input" type="file" accept="image/*,.heic,.heif" onChange={(e) => setFile(e.target.files?.[0] || null)} />
             </div>
             <button className="btn btn-primary btn-small" disabled={busy}>{busy ? "Saving…" : "Log round"}</button>
+            <button type="button" className="btn btn-small" onClick={() => setShowForm(false)}>Cancel</button>
           </form>
+          )}
         </div>
       )}
     </div>
