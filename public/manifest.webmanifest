@@ -1,6 +1,6 @@
 {
-  "name": "Loop Rank",
-  "short_name": "Loop Rank",
+  "name": "Loop Ranks",
+  "short_name": "Loop Ranks",
   "description": "Rank the courses you've played. Prove it with the card.",
   "start_url": "/edit",
   "display": "browser",
