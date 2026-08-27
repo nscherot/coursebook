@@ -192,6 +192,32 @@ label.field { display: block; font-size: 13px; color: var(--text-secondary); fon
   font-size: 13.5px;
 }
 .round-score { font-weight: 700; color: var(--accent); font-size: 15px; }
+
+/* labeled round cards */
+.round-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-main);
+  padding: 14px 16px;
+  margin-top: 10px;
+}
+.round-body { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.round-stats { display: flex; gap: 28px; flex-wrap: wrap; }
+.round-stat { min-width: 0; }
+.round-stat-label {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.round-stat-value { font-size: 15px; font-weight: 500; line-height: 1.35; }
+.round-stat-score { font-size: 24px; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.round-actions { display: flex; gap: 18px; margin-top: 12px; align-items: baseline; }
+.round-scorecard { flex: none; }
+@media (max-width: 820px) {
+  .round-stats { gap: 20px; }
+  .round-card { padding: 12px 14px; }
+}
 .scorecard-thumb {
   display: block;
   max-width: 260px; max-height: 170px;
