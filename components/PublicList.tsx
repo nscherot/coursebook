@@ -8,15 +8,26 @@ const CourseMap = dynamic(() => import("./CourseMap"), { ssr: false });
 
 export type PublicRound = Round & { scorecard_url: string | null };
 
+export type OwnerMeta = {
+  location?: string | null;
+  home_course?: string | null;
+  handicap?: number | null;
+};
+
 type Props = {
   title: string;
   ownerName: string;
+  ownerMeta?: OwnerMeta;
   entries: Entry[];
   roundsByEntry: Record<string, PublicRound[]>;
   demoBanner?: boolean;
 };
 
-export default function PublicList({ title, ownerName, entries, roundsByEntry, demoBanner }: Props) {
+function fmtHandicap(h: number): string {
+  return h < 0 ? `+${Math.abs(h)}` : String(h);
+}
+
+export default function PublicList({ title, ownerName, ownerMeta, entries, roundsByEntry, demoBanner }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -53,6 +64,17 @@ export default function PublicList({ title, ownerName, entries, roundsByEntry, d
         <h1 style={{ fontSize: 30, margin: 0 }}>{title}</h1>
         <span className="muted">by {ownerName}</span>
       </div>
+      {ownerMeta && (ownerMeta.location || ownerMeta.home_course || ownerMeta.handicap != null) && (
+        <div className="small muted" style={{ marginBottom: 10, marginTop: -2 }}>
+          {[
+            ownerMeta.location,
+            ownerMeta.home_course ? `Home: ${ownerMeta.home_course}` : null,
+            ownerMeta.handicap != null ? `${fmtHandicap(ownerMeta.handicap)} index` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
         <span className="chip">{entries.length} courses</span>
         <span className="chip">{totalRounds} rounds logged</span>
