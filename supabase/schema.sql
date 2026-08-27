@@ -80,3 +80,12 @@ create policy "users update own scorecards"
 create policy "users delete own scorecards"
   on storage.objects for delete
   using (bucket_id = 'scorecards' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Profile details (added for the /profile page) ------------------------------
+alter table public.profiles
+  add column if not exists first_name  text,
+  add column if not exists last_name   text,
+  add column if not exists location    text,
+  add column if not exists home_course text,
+  add column if not exists handicap    numeric(4,1)
+    check (handicap is null or (handicap >= -10 and handicap <= 54));
