@@ -6,7 +6,8 @@ export default function Home() {
     <main className="container" style={{ paddingTop: 56, paddingBottom: 40 }}>
       <div style={{ maxWidth: 640 }}>
         <h1 style={{ fontSize: 40, margin: "0 0 12px" }}>
-          Your courses. Your ranks. <span style={{ color: "var(--accent)" }}>Your cards.</span>
+          Your courses. Your ranks.{" "}
+          <span style={{ color: "var(--accent)", fontStyle: "italic" }}>Your cards.</span>
         </h1>
         <p style={{ fontSize: 17, color: "var(--text-secondary)", margin: "0 0 8px" }}>
           {SITE_NAME} is where golfers keep their own ranked list of every great course
