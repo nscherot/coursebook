@@ -631,14 +631,20 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
           <div className="course-loc">{entry.location}{entry.lat == null && <span className="muted"> · no pin yet</span>}</div>
           {noteEdit === null ? (
             <div className="course-note">
-              {entry.note ? `“${entry.note}”` : <span className="muted">no note yet</span>}{" "}
-              <a className="rowlink" onClick={(ev) => { ev.stopPropagation(); setNoteEdit(entry.note); }}>edit</a>
+              {entry.note ? `“${entry.note}”` : <span className="muted">Course commentary — why this rank?</span>}{" "}
+              <a className="rowlink" onClick={(ev) => { ev.stopPropagation(); setNoteEdit(entry.note); }}>{entry.note ? "edit" : "add"}</a>
             </div>
           ) : (
             <div onClick={(ev) => ev.stopPropagation()} style={{ marginTop: 6 }}>
-              <textarea className="input" rows={2} value={noteEdit} onChange={(e) => setNoteEdit(e.target.value)} />
+              <textarea
+                className="input"
+                rows={2}
+                value={noteEdit}
+                onChange={(e) => setNoteEdit(e.target.value)}
+                placeholder="Your take — what makes this course rank here?"
+              />
               <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                <button className="btn btn-small btn-primary" onClick={() => { onSaveNote(noteEdit); setNoteEdit(null); }}>Save note</button>
+                <button className="btn btn-small btn-primary" onClick={() => { onSaveNote(noteEdit); setNoteEdit(null); }}>Save commentary</button>
                 <button className="btn btn-small" onClick={() => setNoteEdit(null)}>Cancel</button>
               </div>
             </div>
@@ -734,7 +740,7 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
               <input className="input" type="number" min={18} max={300} value={score} onChange={(e) => setScore(e.target.value)} placeholder="82" />
             </div>
             <div style={{ flex: "1 1 160px" }}>
-              <label className="field">Notes</label>
+              <label className="field">Highlight</label>
               <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Birdied 18 into the wind…" />
             </div>
             <div style={{ flex: "1 1 170px" }}>
