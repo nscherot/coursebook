@@ -42,7 +42,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         <footer className="footer-note">
           <div className="container">
-            {SITE_NAME} — {TAGLINE} · Map data © OpenStreetMap contributors
+            {SITE_NAME} — {TAGLINE} · <Link href="/privacy">Privacy</Link> ·{" "}
+            <Link href="/terms">Terms</Link> · Map data © OpenStreetMap contributors
           </div>
         </footer>
       </body>
