@@ -481,7 +481,7 @@ function Editor(props: any) {
       )}
 
       <div className="list-layout">
-        <div className="list-map">
+        <div className="edit-left">
           <div className="edit-map-wrap">
             <CourseMap points={points} selectedId={selectedId} onSelect={setSelectedId} height="min(60vh, 560px)" />
           </div>
