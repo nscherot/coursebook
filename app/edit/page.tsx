@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getBrowserClient, scorecardUrl } from "@/lib/supabase/client";
 import { SITE_NAME } from "@/lib/config";
+import { fmtDate } from "@/lib/format";
 import type { Entry, Profile, Round } from "@/lib/types";
 
 const CourseMap = dynamic(() => import("@/components/CourseMap"), { ssr: false });
@@ -661,19 +662,47 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
           {rounds.map((r: Round) => {
             const blank = !r.played_on && r.score == null && !r.notes && !r.scorecard_path;
             return (
-              <div key={r.id} className="round-row">
+              <div key={r.id} className="round-card">
                 {blank ? (
-                  <span className="muted" style={{ fontStyle: "italic" }}>played — no details logged yet</span>
+                  <div style={{ display: "flex", gap: 18, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <span className="muted" style={{ fontStyle: "italic" }}>played — no details logged yet</span>
+                    <a className="rowlink" style={{ color: "var(--accent)", fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
+                    <a className="rowlink" style={{ color: "var(--danger)" }} onClick={() => onDeleteRound(r)}>delete</a>
+                  </div>
                 ) : (
-                  <>
-                    {r.score != null && <span className="round-score">{r.score}</span>}
-                    <span className="muted">{r.played_on || "date unknown"}</span>
-                    {r.notes && <span>{r.notes}</span>}
-                    {r.scorecard_path && <ScorecardThumb path={r.scorecard_path} name={entry.name} />}
-                  </>
+                  <div className="round-body">
+                    <div style={{ flex: "1 1 220px" }}>
+                      <div className="round-stats">
+                        {r.score != null && (
+                          <div className="round-stat">
+                            <div className="round-stat-label">Score</div>
+                            <div className="round-stat-value round-stat-score">{r.score}</div>
+                          </div>
+                        )}
+                        <div className="round-stat">
+                          <div className="round-stat-label">Date played</div>
+                          <div className="round-stat-value">{r.played_on ? fmtDate(r.played_on) : "—"}</div>
+                        </div>
+                        {r.notes && (
+                          <div className="round-stat">
+                            <div className="round-stat-label">Highlight</div>
+                            <div className="round-stat-value">{r.notes}</div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="round-actions">
+                        <a className="rowlink" style={{ color: "var(--accent)", fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
+                        <a className="rowlink" style={{ color: "var(--danger)" }} onClick={() => onDeleteRound(r)}>delete</a>
+                      </div>
+                    </div>
+                    {r.scorecard_path && (
+                      <div className="round-scorecard">
+                        <div className="round-stat-label">Scorecard</div>
+                        <ScorecardThumb path={r.scorecard_path} name={entry.name} />
+                      </div>
+                    )}
+                  </div>
                 )}
-                <a className="rowlink" style={{ color: "var(--accent)", fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
-                <a className="rowlink" style={{ color: "var(--danger)" }} onClick={() => onDeleteRound(r)}>delete</a>
               </div>
             );
           })}
