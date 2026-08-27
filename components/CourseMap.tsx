@@ -33,7 +33,12 @@ export default function CourseMap({ points, selectedId, onSelect, height = 520 }
       if (cancelled || !divRef.current) return;
 
       if (!mapRef.current) {
-        mapRef.current = L.map(divRef.current, { worldCopyJump: true, scrollWheelZoom: true });
+        mapRef.current = L.map(divRef.current, {
+          worldCopyJump: true,
+          scrollWheelZoom: true,
+          zoomControl: false,
+        });
+        L.control.zoom({ position: "bottomright" }).addTo(mapRef.current);
         mapRef.current.attributionControl?.setPrefix(false);
         L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
@@ -50,9 +55,9 @@ export default function CourseMap({ points, selectedId, onSelect, height = 520 }
         const icon = L.divIcon({
           className: "pin",
           html: `<span><i>${p.rank}</i></span>`,
-          iconSize: [26, 26],
-          iconAnchor: [4, 24],
-          popupAnchor: [9, -24],
+          iconSize: [28, 28],
+          iconAnchor: [14, 28],
+          popupAnchor: [0, -26],
         });
         const m = L.marker([p.lat!, p.lng!], { icon, title: `#${p.rank} ${p.name}`, riseOnHover: true })
           .addTo(map)
@@ -89,7 +94,7 @@ export default function CourseMap({ points, selectedId, onSelect, height = 520 }
     });
     if (selectedId && markersRef.current[selectedId]) {
       const m = markersRef.current[selectedId];
-      map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 11), { duration: 0.7 });
+      map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 11), { duration: 0.8 });
       m.openPopup();
     }
   }, [selectedId]);
@@ -101,7 +106,7 @@ export default function CourseMap({ points, selectedId, onSelect, height = 520 }
     };
   }, []);
 
-  return <div ref={divRef} style={{ height, width: "100%", borderRadius: 14 }} />;
+  return <div ref={divRef} style={{ height, width: "100%", borderRadius: 16, overflow: "hidden" }} />;
 }
 
 function escapeHtml(s: string) {
