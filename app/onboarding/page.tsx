@@ -75,8 +75,8 @@ export default function OnboardingPage() {
             supabase={supabase!}
             profile={{ id: userId, list_size: listSize }}
             existingCount={0}
-            onDone={() => router.replace("/edit")}
-            onSkip={() => router.replace("/edit")}
+            onDone={() => router.replace("/profile?welcome=1")}
+            onSkip={() => router.replace("/profile?welcome=1")}
           />
         </div>
       </main>
