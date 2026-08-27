@@ -35,9 +35,9 @@ export default function CourseMap({ points, selectedId, onSelect, height = 520 }
       if (!mapRef.current) {
         mapRef.current = L.map(divRef.current, { worldCopyJump: true, scrollWheelZoom: true });
         mapRef.current.attributionControl?.setPrefix(false);
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png", {
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
-          attribution: "© OpenStreetMap © CARTO",
+          attribution: "© OpenStreetMap contributors",
         }).addTo(mapRef.current);
       }
       const map = mapRef.current;
