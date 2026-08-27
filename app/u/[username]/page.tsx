@@ -21,7 +21,7 @@ export default async function UserPage({ params }: { params: { username: string 
   const username = params.username.toLowerCase();
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, username, display_name, list_title, list_size")
+    .select("*")
     .eq("username", username)
     .maybeSingle();
   if (!profile) notFound();
@@ -50,6 +50,11 @@ export default async function UserPage({ params }: { params: { username: string 
     <PublicList
       title={profile.list_title}
       ownerName={profile.display_name || profile.username}
+      ownerMeta={{
+        location: profile.location,
+        home_course: profile.home_course,
+        handicap: profile.handicap,
+      }}
       entries={(entries || []) as Entry[]}
       roundsByEntry={roundsByEntry}
     />
