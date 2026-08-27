@@ -417,13 +417,13 @@ function Editor(props: any) {
         photoUrl: scorecardUrl(r.scorecard_path),
         siteName: SITE_NAME,
       });
-      const file = new File([blob], "coursebook-story.png", { type: "image/png" });
+      const file = new File([blob], "looprank-story.png", { type: "image/png" });
       const nav: any = navigator;
       const downloadIt = () => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "coursebook-story.png";
+        a.download = "looprank-story.png";
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 5000);
         setMsg("Story card downloaded — AirDrop it to your phone or post from IG on desktop.");
