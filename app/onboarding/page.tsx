@@ -11,7 +11,8 @@ export default function OnboardingPage() {
   const [importStep, setImportStep] = useState(false);
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [listTitle, setListTitle] = useState("My Top 25 Golf Courses");
+  const [listTitle, setListTitle] = useState("");
+  const [titleTouched, setTitleTouched] = useState(false);
   const [listSize, setListSize] = useState(25);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,6 +36,13 @@ export default function OnboardingPage() {
     );
   }
 
+  // "nate" → "Nate's list" — the default list title, following the username live.
+  function defaultTitle(u: string): string {
+    const clean = u.trim().toLowerCase();
+    if (!clean) return "My list";
+    return `${clean.charAt(0).toUpperCase()}${clean.slice(1)}'s list`;
+  }
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!userId) return;
@@ -49,7 +57,7 @@ export default function OnboardingPage() {
       id: userId,
       username: uname,
       display_name: displayName.trim() || uname,
-      list_title: listTitle.trim() || "My Top Courses",
+      list_title: (titleTouched ? listTitle.trim() : "") || defaultTitle(uname),
       list_size: listSize,
     });
     setBusy(false);
@@ -103,8 +111,12 @@ export default function OnboardingPage() {
           </div>
           <div>
             <label className="field" htmlFor="listTitle">List title</label>
-            <input id="listTitle" className="input" value={listTitle}
-              onChange={(e) => setListTitle(e.target.value)} />
+            <input id="listTitle" className="input"
+              value={titleTouched ? listTitle : defaultTitle(username)}
+              onChange={(e) => { setTitleTouched(true); setListTitle(e.target.value); }} />
+            <div className="small muted" style={{ marginTop: 4 }}>
+              You can rename this any time in Settings.
+            </div>
           </div>
           <div>
             <label className="field" htmlFor="listSize">List size</label>
