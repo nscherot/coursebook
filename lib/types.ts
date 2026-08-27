@@ -4,6 +4,11 @@ export type Profile = {
   display_name: string;
   list_title: string;
   list_size: number;
+  first_name?: string | null;
+  last_name?: string | null;
+  location?: string | null;
+  home_course?: string | null;
+  handicap?: number | null;
 };
 
 export type Entry = {
