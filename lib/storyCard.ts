@@ -11,7 +11,7 @@ export type StoryCardData = {
   score: number | null;
   note?: string;
   photoUrl: string | null; // scorecard photo (public URL) or null
-  siteName?: string;       // "Loop Rank"
+  siteName?: string;       // "Loop Ranks"
 };
 
 const W = 1080;
@@ -237,7 +237,7 @@ export async function renderStoryCard(data: StoryCardData): Promise<Blob> {
   // ---- footer branding on green ----
   ctx.fillStyle = CREAM;
   ctx.font = serifBold(44);
-  ctx.fillText(`⛳ ${data.siteName || "Loop Rank"}`, W / 2, cardY + cardH + 96);
+  ctx.fillText(`⛳ ${data.siteName || "Loop Ranks"}`, W / 2, cardY + cardH + 96);
   ctx.fillStyle = "rgba(252,252,251,0.75)";
   ctx.font = sans(28);
   ctx.fillText("rank the courses you've played", W / 2, cardY + cardH + 150);
