@@ -1,0 +1,3141 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  api/
+    courses/
+      search/
+        route.ts
+  auth/
+    callback/
+      route.ts
+  demo/
+    page.tsx
+  edit/
+    page.tsx
+  login/
+    page.tsx
+  onboarding/
+    page.tsx
+  u/
+    [username]/
+      page.tsx
+  globals.css
+  layout.tsx
+  page.tsx
+components/
+  CourseMap.tsx
+  PasteImport.tsx
+  PublicList.tsx
+data/
+  nate-top25.json
+lib/
+  supabase/
+    client.ts
+    server.ts
+  config.ts
+  importParse.ts
+  storyCard.ts
+  types.ts
+public/
+  apple-touch-icon.png
+  icon-192.png
+  icon-512.png
+  manifest.webmanifest
+supabase/
+  schema.sql
+.env.example
+.gitignore
+middleware.ts
+next.config.mjs
+package.json
+README.md
+SETUP.md
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/api/courses/search/route.ts">
+import { NextResponse } from "next/server";
+
+// Proxies course search to golfcourseapi.com so the API key stays on the server.
+// Set GOLF_COURSE_API_KEY in Vercel (Project -> Settings -> Environment Variables).
+
+const API_BASE = "https://api.golfcourseapi.com";
+
+type ApiCourse = {
+  id?: string | number;
+  club_name?: string;
+  course_name?: string;
+  location?: {
+    address?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    latitude?: number;
+    longitude?: number;
+    lat?: number;
+    lng?: number;
+  };
+  latitude?: number;
+  longitude?: number;
+};
+
+function displayName(c: ApiCourse): string {
+  const club = (c.club_name || "").trim();
+  const course = (c.course_name || "").trim();
+  if (!club) return course || "Unknown course";
+  if (!course || course.toLowerCase() === club.toLowerCase()) return club;
+  return `${club} (${course})`;
+}
+
+function locationText(c: ApiCourse): string {
+  const l = c.location || {};
+  return [l.city, l.state, l.country].filter(Boolean).join(", ");
+}
+
+function coords(c: ApiCourse): { lat: number | null; lng: number | null } {
+  const l = c.location || {};
+  const lat = l.latitude ?? l.lat ?? c.latitude ?? null;
+  const lng = l.longitude ?? l.lng ?? c.longitude ?? null;
+  return {
+    lat: typeof lat === "number" ? lat : null,
+    lng: typeof lng === "number" ? lng : null,
+  };
+}
+
+async function callApi(query: string, key: string, scheme: "Key" | "Bearer") {
+  return fetch(
+    `${API_BASE}/v1/search?search_query=${encodeURIComponent(query)}`,
+    {
+      headers: { Authorization: `${scheme} ${key}` },
+      // Course data changes rarely; cache identical searches for a day to save quota.
+      next: { revalidate: 86400 },
+    }
+  );
+}
+
+export async function GET(request: Request) {
+  const key = process.env.GOLF_COURSE_API_KEY;
+  const { searchParams } = new URL(request.url);
+  const q = (searchParams.get("q") || "").trim();
+
+  if (!key) return NextResponse.json({ configured: false, courses: [] });
+  if (q.length < 2) return NextResponse.json({ configured: true, courses: [] });
+
+  try {
+    let res = await callApi(q, key, "Key");
+    if (res.status === 401) res = await callApi(q, key, "Bearer");
+    if (!res.ok) {
+      return NextResponse.json(
+        { configured: true, courses: [], error: `Course database returned ${res.status}` },
+        { status: 200 }
+      );
+    }
+    const data = await res.json();
+    const list: ApiCourse[] = Array.isArray(data?.courses) ? data.courses : [];
+    const courses = list.slice(0, 10).map((c) => {
+      const { lat, lng } = coords(c);
+      return {
+        id: c.id ?? null,
+        name: displayName(c),
+        location: locationText(c),
+        address: c.location?.address || "",
+        lat,
+        lng,
+      };
+    });
+    return NextResponse.json({ configured: true, courses });
+  } catch {
+    return NextResponse.json(
+      { configured: true, courses: [], error: "Could not reach the course database" },
+      { status: 200 }
+    );
+  }
+}
+</file>
+
+<file path="app/auth/callback/route.ts">
+import { NextResponse } from "next/server";
+import { getServerClient } from "@/lib/supabase/server";
+import type { EmailOtpType } from "@supabase/supabase-js";
+
+export async function GET(request: Request) {
+  const { searchParams, origin } = new URL(request.url);
+  const code = searchParams.get("code");
+  const tokenHash = searchParams.get("token_hash");
+  const type = searchParams.get("type") as EmailOtpType | null;
+
+  const supabase = getServerClient();
+  if (!supabase) return NextResponse.redirect(`${origin}/login`);
+
+  let ok = false;
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    ok = !error;
+  } else if (tokenHash && type) {
+    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+    ok = !error;
+  }
+  if (!ok) return NextResponse.redirect(`${origin}/login`);
+
+  // Send new users to onboarding, returning users to their list.
+  const { data: userData } = await supabase.auth.getUser();
+  if (userData.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("id", userData.user.id)
+      .maybeSingle();
+    if (!profile) return NextResponse.redirect(`${origin}/onboarding`);
+  }
+  return NextResponse.redirect(`${origin}/edit`);
+}
+</file>
+
+<file path="app/demo/page.tsx">
+import PublicList from "@/components/PublicList";
+import nate from "@/data/nate-top25.json";
+import type { Entry } from "@/lib/types";
+
+export default function DemoPage() {
+  const entries: Entry[] = nate.map((c, i) => ({
+    id: `demo-${i + 1}`,
+    user_id: "demo",
+    rank: c.rank,
+    name: c.name,
+    location: c.location,
+    lat: c.lat,
+    lng: c.lng,
+    note: c.note || "",
+  }));
+
+  return (
+    <PublicList
+      title="Nate's Top 25 Golf Courses"
+      ownerName="Nate"
+      entries={entries}
+      roundsByEntry={{}}
+      demoBanner
+    />
+  );
+}
+</file>
+
+<file path="app/edit/page.tsx">
+"use client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { getBrowserClient, scorecardUrl } from "@/lib/supabase/client";
+import { SITE_NAME } from "@/lib/config";
+import type { Entry, Profile, Round } from "@/lib/types";
+
+const CourseMap = dynamic(() => import("@/components/CourseMap"), { ssr: false });
+import PasteImport from "@/components/PasteImport";
+
+type Status = "loading" | "no-config" | "signed-out" | "no-profile" | "ready";
+
+export default function EditPage() {
+  const supabase = useMemo(() => getBrowserClient(), []);
+  const [status, setStatus] = useState<Status>("loading");
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [entries, setEntries] = useState<Entry[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [msg, setMsg] = useState("");
+
+  const reload = useCallback(async () => {
+    if (!supabase) return;
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      setStatus("signed-out");
+      return;
+    }
+    const uid = userData.user.id;
+    const { data: prof } = await supabase.from("profiles").select("*").eq("id", uid).maybeSingle();
+    if (!prof) {
+      setStatus("no-profile");
+      return;
+    }
+    setProfile(prof as Profile);
+    const [{ data: ents }, { data: rds }] = await Promise.all([
+      supabase.from("entries").select("*").eq("user_id", uid).order("rank"),
+      supabase.from("rounds").select("*").eq("user_id", uid).order("played_on", { ascending: false }),
+    ]);
+    setEntries((ents || []) as Entry[]);
+    setRounds((rds || []) as Round[]);
+    setStatus("ready");
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) {
+      setStatus("no-config");
+      return;
+    }
+    reload();
+  }, [supabase, reload]);
+
+  if (status === "no-config")
+    return (
+      <Notice title="Not connected yet.">
+        Supabase environment variables aren&rsquo;t set, so the editor is disabled in this preview.
+        Follow SETUP.md to connect the database.
+      </Notice>
+    );
+  if (status === "loading") return <Notice title="Loading…"> </Notice>;
+  if (status === "signed-out")
+    return (
+      <Notice title="You're signed out.">
+        <Link href="/login">Sign in</Link> to build your list.
+      </Notice>
+    );
+  if (status === "no-profile")
+    return (
+      <Notice title="Almost there.">
+        <Link href="/onboarding">Finish setting up your profile</Link> to start your list.
+      </Notice>
+    );
+
+  return (
+    <Editor
+      supabase={supabase!}
+      profile={profile!}
+      entries={entries}
+      rounds={rounds}
+      setEntries={setEntries}
+      setRounds={setRounds}
+      selectedId={selectedId}
+      setSelectedId={setSelectedId}
+      msg={msg}
+      setMsg={setMsg}
+      reload={reload}
+    />
+  );
+}
+
+function Notice({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <main className="container" style={{ paddingTop: 48 }}>
+      <div className="card" style={{ maxWidth: 480 }}>
+        <b>{title}</b>
+        <p className="small muted">{children}</p>
+      </div>
+    </main>
+  );
+}
+
+/* ---------------- editor ---------------- */
+
+function Editor(props: any) {
+  const { supabase, profile, entries, rounds, setEntries, setRounds, selectedId, setSelectedId, msg, setMsg, reload } = props;
+
+  const points = useMemo(
+    () => entries.map((e: Entry) => ({ id: e.id, rank: e.rank, name: e.name, location: e.location, lat: e.lat, lng: e.lng })),
+    [entries]
+  );
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  }
+
+  /* ----- add course ----- */
+  const [newName, setNewName] = useState("");
+  const [newLoc, setNewLoc] = useState("");
+  const [newLat, setNewLat] = useState<string>("");
+  const [newLng, setNewLng] = useState<string>("");
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [addBusy, setAddBusy] = useState(false);
+  const [dbResults, setDbResults] = useState<any[] | null>(null);
+  const [dbBusy, setDbBusy] = useState(false);
+  const [dbConfigured, setDbConfigured] = useState(true);
+  const [dbOpen, setDbOpen] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
+  const searchCache = useRef<Record<string, any[]>>({});
+
+  async function geocodeQuery(q: string): Promise<{ lat: string; lng: string; label: string } | null> {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`
+      );
+      const results = await res.json();
+      if (results.length > 0) {
+        return {
+          lat: Number(results[0].lat).toFixed(5),
+          lng: Number(results[0].lon).toFixed(5),
+          label: results[0].display_name,
+        };
+      }
+    } catch {
+      /* fall through */
+    }
+    return null;
+  }
+
+  async function geocode() {
+    const q = `${newName} ${newLoc}`.trim();
+    if (!q) return;
+    setGeoBusy(true);
+    setMsg("");
+    const hit = await geocodeQuery(q);
+    if (hit) {
+      setNewLat(hit.lat);
+      setNewLng(hit.lng);
+      setMsg(`Pinned near: ${hit.label}`);
+    } else {
+      setMsg("No match found — try adding the town/state, or type coordinates manually.");
+    }
+    setGeoBusy(false);
+  }
+
+  // Debounced type-ahead: fires only after a typing pause, ≥4 chars,
+  // with per-session caching and stale-response protection (quota-friendly).
+  function onNameChange(value: string) {
+    setNewName(value);
+    if (!dbConfigured) return;
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const q = value.trim().toLowerCase();
+    if (q.length < 4) {
+      setDbOpen(false);
+      setDbResults(null);
+      return;
+    }
+    if (searchCache.current[q]) {
+      setDbResults(searchCache.current[q]);
+      setDbOpen(true);
+      return;
+    }
+    setDbBusy(true);
+    setDbOpen(true);
+    searchTimer.current = setTimeout(() => runSearch(q), 550);
+  }
+
+  async function runSearch(q: string) {
+    const seq = ++searchSeq.current;
+    try {
+      const res = await fetch(`/api/courses/search?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (seq !== searchSeq.current) return; // a newer search superseded this one
+      if (!data.configured) {
+        setDbConfigured(false);
+        setDbOpen(false);
+        setMsg("Course database isn't connected (no API key) — add courses manually with Find on map.");
+      } else if (data.error) {
+        setDbOpen(false);
+        setMsg(`${data.error} — you can still add the course manually.`);
+      } else {
+        searchCache.current[q] = data.courses;
+        setDbResults(data.courses);
+        setDbOpen(true);
+      }
+    } catch {
+      if (seq === searchSeq.current) setDbOpen(false);
+    }
+    if (seq === searchSeq.current) setDbBusy(false);
+  }
+
+  async function pickDbCourse(c: any) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchSeq.current++; // invalidate any in-flight search
+    setNewName(c.name);
+    setNewLoc(c.location || "");
+    setDbResults(null);
+    setDbOpen(false);
+    setDbBusy(false);
+    if (c.lat != null && c.lng != null) {
+      setNewLat(String(c.lat));
+      setNewLng(String(c.lng));
+      setMsg(`Selected ${c.name} — pin set from the course database.`);
+      return;
+    }
+    // No coordinates from the API: geocode for the map pin, trying several phrasings.
+    // A course-name match is only trusted if it lands near the course's town —
+    // otherwise a same-named course elsewhere could hijack the pin.
+    setGeoBusy(true);
+    const baseName = c.name.replace(/\s*\(.*\)$/, ""); // "Club (Course No. 1)" -> "Club"
+    const town = (c.location || "").split(",")[0].trim();
+    const townHit = c.location ? await geocodeQuery(c.location) : null;
+    const nearTown = (h: { lat: string; lng: string }) =>
+      !townHit ||
+      (Math.abs(Number(h.lat) - Number(townHit.lat)) < 1.0 &&
+        Math.abs(Number(h.lng) - Number(townHit.lng)) < 1.0);
+    const candidates = [
+      c.address,
+      `${baseName}, ${c.location || ""}`,
+      town ? `${baseName}, ${town}` : "",
+      baseName,
+    ].filter((s: string | undefined) => s && s.trim().length > 3);
+    let hit: { lat: string; lng: string; label: string } | null = null;
+    for (const q of candidates) {
+      const h = await geocodeQuery(q as string);
+      if (h && nearTown(h)) { hit = h; break; }
+    }
+    if (!hit && townHit) {
+      hit = { ...townHit, label: `${townHit.label} (town center — nudge the pin if needed)` };
+    }
+    if (hit) {
+      setNewLat(hit.lat);
+      setNewLng(hit.lng);
+      setMsg(`Selected ${c.name} — pinned near ${hit.label}`);
+    } else {
+      setMsg(`Selected ${c.name} — couldn't find map coordinates automatically; use Find on map or type them.`);
+    }
+    setGeoBusy(false);
+  }
+
+  async function addCourse(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    if (entries.length >= profile.list_size) {
+      setMsg(`Your list is capped at ${profile.list_size}. Remove a course or raise the cap in settings.`);
+      return;
+    }
+    setAddBusy(true);
+    const { data: created, error } = await supabase
+      .from("entries")
+      .insert({
+        user_id: profile.id,
+        rank: entries.length + 1,
+        name: newName.trim(),
+        location: newLoc.trim(),
+        lat: newLat ? Number(newLat) : null,
+        lng: newLng ? Number(newLng) : null,
+        note: "",
+      })
+      .select("id")
+      .single();
+    // Being on the list means you've played it — start every course with one round.
+    if (!error && created) {
+      await supabase.from("rounds").insert({ user_id: profile.id, entry_id: created.id, notes: "" });
+    }
+    setAddBusy(false);
+    if (error) setMsg(error.message);
+    else {
+      setNewName(""); setNewLoc(""); setNewLat(""); setNewLng("");
+      setMsg("");
+      reload();
+    }
+  }
+
+  /* ----- reorder / edit / delete ----- */
+  async function move(entry: Entry, dir: -1 | 1) {
+    const idx = entries.findIndex((e: Entry) => e.id === entry.id);
+    const other = entries[idx + dir];
+    if (!other) return;
+    const updated = [...entries];
+    updated[idx] = { ...other, rank: entry.rank };
+    updated[idx + dir] = { ...entry, rank: other.rank };
+    setEntries(updated);
+    await Promise.all([
+      supabase.from("entries").update({ rank: other.rank }).eq("id", entry.id),
+      supabase.from("entries").update({ rank: entry.rank }).eq("id", other.id),
+    ]);
+  }
+
+  async function saveNote(entry: Entry, note: string) {
+    setEntries(entries.map((e: Entry) => (e.id === entry.id ? { ...e, note } : e)));
+    await supabase.from("entries").update({ note }).eq("id", entry.id);
+  }
+
+  async function removeEntry(entry: Entry) {
+    if (!confirm(`Remove ${entry.name} from your list?`)) return;
+    await supabase.from("entries").delete().eq("id", entry.id);
+    // close the rank gap
+    const remaining = entries.filter((e: Entry) => e.id !== entry.id);
+    await Promise.all(
+      remaining.map((e: Entry, i: number) =>
+        e.rank !== i + 1 ? supabase.from("entries").update({ rank: i + 1 }).eq("id", e.id) : null
+      )
+    );
+    reload();
+  }
+
+  /* ----- rounds ----- */
+  // iPhone photos are often HEIC (even when renamed .png/.jpg) — browsers can't
+  // display those, so sniff the real format and convert to JPEG when needed.
+  async function normalizePhoto(file: File): Promise<{ blob: Blob; ext: string; converted: boolean } | null> {
+    const head = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    const sig = String.fromCharCode.apply(null, Array.from(head.slice(4, 12)));
+    const isHeic = /ftyp(heic|heix|hevc|heim|heis|hevm|hevs|mif1|msf1)/.test("ftyp" + sig.slice(4));
+    if (!isHeic) {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      return { blob: file, ext: ["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ? ext : "jpg", converted: false };
+    }
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const out = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      return { blob: Array.isArray(out) ? out[0] : (out as Blob), ext: "jpg", converted: true };
+    } catch {
+      return null;
+    }
+  }
+
+  function isBlankRound(r: Round) {
+    return !r.played_on && r.score == null && !r.notes && !r.scorecard_path;
+  }
+
+  async function addRound(entry: Entry, form: { date: string; score: string; notes: string; file: File | null }) {
+    let scorecard_path: string | null = null;
+    if (form.file) {
+      const photo = await normalizePhoto(form.file);
+      if (!photo) {
+        setMsg("Couldn't read that photo — it may be an iPhone HEIC file. Open it in Preview and use File → Export → JPEG, then upload that.");
+        return false;
+      }
+      if (photo.converted) setMsg("Converted your iPhone photo to JPEG automatically.");
+      const path = `${profile.id}/${crypto.randomUUID()}.${photo.ext}`;
+      const { error: upErr } = await supabase.storage.from("scorecards").upload(path, photo.blob, {
+        cacheControl: "31536000",
+        upsert: false,
+        contentType: photo.ext === "png" ? "image/png" : photo.ext === "webp" ? "image/webp" : photo.ext === "gif" ? "image/gif" : "image/jpeg",
+      });
+      if (upErr) {
+        setMsg(`Scorecard upload failed: ${upErr.message}`);
+        return false;
+      }
+      scorecard_path = path;
+    }
+    // If this course only has its auto-created "played" round with no details,
+    // fill that one in instead of stacking a second round.
+    const entryRounds = rounds.filter((r: Round) => r.entry_id === entry.id);
+    const blank = entryRounds.length === 1 && isBlankRound(entryRounds[0]) ? entryRounds[0] : null;
+    const values = {
+      played_on: form.date || null,
+      score: form.score ? Number(form.score) : null,
+      notes: form.notes.trim(),
+      scorecard_path,
+    };
+    const { error } = blank
+      ? await supabase.from("rounds").update(values).eq("id", blank.id)
+      : await supabase.from("rounds").insert({ user_id: profile.id, entry_id: entry.id, ...values });
+    if (error) {
+      setMsg(error.message);
+      return false;
+    }
+    reload();
+    return true;
+  }
+
+  async function deleteRound(r: Round) {
+    if (!confirm("Delete this round?")) return;
+    if (r.scorecard_path) await supabase.storage.from("scorecards").remove([r.scorecard_path]);
+    await supabase.from("rounds").delete().eq("id", r.id);
+    reload();
+  }
+
+  // Build the 1080x1920 Instagram-Story card for a round and hand it to the
+  // native share sheet (phone) or download it (desktop).
+  async function shareRound(entry: Entry, r: Round) {
+    try {
+      setMsg("Building your story card…");
+      const { renderStoryCard } = await import("@/lib/storyCard");
+      const blob = await renderStoryCard({
+        rank: entry.rank,
+        listTitle: profile.list_title,
+        courseName: entry.name,
+        location: entry.location,
+        playedOn: r.played_on,
+        score: r.score,
+        photoUrl: scorecardUrl(r.scorecard_path),
+        siteName: SITE_NAME,
+      });
+      const file = new File([blob], "coursebook-story.png", { type: "image/png" });
+      const nav: any = navigator;
+      const downloadIt = () => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "coursebook-story.png";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        setMsg("Story card downloaded — AirDrop it to your phone or post from IG on desktop.");
+      };
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        try {
+          await nav.share({ files: [file], title: `${entry.name} — ${SITE_NAME}` });
+          setMsg("");
+        } catch (e: any) {
+          if (e?.name === "AbortError") setMsg("");
+          else downloadIt(); // share sheet refused (e.g. lost user-gesture) — fall back
+        }
+      } else {
+        downloadIt();
+      }
+    } catch {
+      setMsg("Couldn't build the share card — try again.");
+    }
+  }
+
+  /* ----- settings / import ----- */
+  const [showSettings, setShowSettings] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+
+  const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/u/${profile.username}` : `/u/${profile.username}`;
+
+  return (
+    <main className="container" style={{ paddingTop: 24 }}>
+      <div className="action-bar">
+        <h1 style={{ fontSize: 28, margin: 0 }}>{profile.list_title}</h1>
+        <span className="chip">{entries.length} / {profile.list_size}</span>
+      </div>
+      <div className="action-strip">
+        <a className="btn btn-small" href={`/u/${profile.username}`} target="_blank">View public page ↗</a>
+        <button className="btn btn-small" onClick={() => { navigator.clipboard?.writeText(shareUrl); setMsg("Share link copied!"); }}>
+          Copy share link
+        </button>
+        <button className="btn btn-small" onClick={() => setShowImport(!showImport)}>Import</button>
+        <button className="btn btn-small" onClick={() => setShowSettings(!showSettings)}>Settings</button>
+        <button className="btn btn-small" onClick={signOut}>Sign out</button>
+      </div>
+
+      {msg && <p className="success-text" style={{ marginTop: 0 }}>{msg}</p>}
+
+      {showSettings && <Settings supabase={supabase} profile={profile} onSaved={() => { setShowSettings(false); reload(); }} />}
+      {showImport && (
+        <div style={{ marginBottom: 16 }}>
+          <PasteImport
+            supabase={supabase}
+            profile={profile}
+            existingCount={entries.length}
+            onDone={() => { setShowImport(false); reload(); }}
+          />
+        </div>
+      )}
+
+      <div className="list-layout">
+        <div className="list-map">
+          <div className="edit-map-wrap">
+            <CourseMap points={points} selectedId={selectedId} onSelect={setSelectedId} height="min(60vh, 560px)" />
+          </div>
+
+          <form className="card" onSubmit={addCourse} style={{ marginTop: 16, display: "grid", gap: 10 }}>
+            <b>Add a course</b>
+            <div className="form-grid">
+              <div style={{ position: "relative" }}>
+                <label className="field">Course name</label>
+                <input
+                  className="input"
+                  value={newName}
+                  onChange={(e) => onNameChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (dbOpen && dbResults && dbResults.length > 0) pickDbCourse(dbResults[0]);
+                    }
+                    if (e.key === "Escape") setDbOpen(false);
+                  }}
+                  onFocus={() => { if (dbResults && dbResults.length > 0 && newName.trim().length >= 4) setDbOpen(true); }}
+                  onBlur={() => setTimeout(() => setDbOpen(false), 200)}
+                  placeholder={dbConfigured ? "Start typing — e.g. cypress…" : "Cypress Point Club"}
+                  autoComplete="off"
+                />
+                {dbOpen && (
+                  <div
+                    style={{
+                      position: "absolute", top: "100%", left: 0, right: 0, zIndex: 60,
+                      marginTop: 4, background: "var(--surface)", border: "1px solid var(--border)",
+                      borderRadius: 10, boxShadow: "var(--shadow)", maxHeight: 300, overflowY: "auto",
+                    }}
+                  >
+                    {dbBusy && (
+                      <div className="small muted" style={{ padding: "10px 14px" }}>Searching 30,000 courses…</div>
+                    )}
+                    {!dbBusy && dbResults && dbResults.length === 0 && (
+                      <div className="small muted" style={{ padding: "10px 14px" }}>
+                        No matches — fill in the town and use 📍 Find on map instead.
+                      </div>
+                    )}
+                    {!dbBusy && dbResults && dbResults.map((c: any, i: number) => (
+                      <div
+                        key={c.id ?? i}
+                        className="course-row clickable"
+                        style={{ padding: "9px 14px", borderBottom: i === dbResults.length - 1 ? "none" : undefined }}
+                        onMouseDown={(e) => { e.preventDefault(); pickDbCourse(c); }}
+                      >
+                        <div className="course-main">
+                          <div className="course-name" style={{ fontSize: 14 }}>{c.name}</div>
+                          <div className="course-loc">{c.location || c.address || ""}</div>
+                        </div>
+                        {i === 0 && <span className="small muted" style={{ flex: "none" }}>↵</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="field">Town / state / country</label>
+                <input className="input" value={newLoc} onChange={(e) => setNewLoc(e.target.value)} placeholder="Pebble Beach, California" />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-small" onClick={geocode} disabled={geoBusy}>
+                {geoBusy ? "Looking up…" : "📍 Find on map"}
+              </button>
+              <div style={{ width: 110 }}>
+                <label className="field">Lat</label>
+                <input className="input" value={newLat} onChange={(e) => setNewLat(e.target.value)} placeholder="40.89" />
+              </div>
+              <div style={{ width: 110 }}>
+                <label className="field">Lng</label>
+                <input className="input" value={newLng} onChange={(e) => setNewLng(e.target.value)} placeholder="-72.44" />
+              </div>
+              <button className="btn btn-primary btn-small" disabled={addBusy || !newName.trim()}>
+                {addBusy ? "Adding…" : `Add at #${entries.length + 1}`}
+              </button>
+            </div>
+            <div className="small muted">
+              {dbConfigured
+                ? "Start typing a course name (4+ letters) and pick from the dropdown — even partial or misspelled names match, and the location and map pin fill in automatically. "
+                : "“Find on map” uses OpenStreetMap search — it gets most courses; nudge the numbers if the pin is off. "}
+              New courses land at the bottom; use the arrows to move them up.
+            </div>
+          </form>
+        </div>
+
+        <div className="list-pane card" style={{ padding: 0, overflow: "hidden" }}>
+          {entries.map((e: Entry, i: number) => (
+            <EntryRow
+              key={e.id}
+              entry={e}
+              rounds={rounds.filter((r: Round) => r.entry_id === e.id)}
+              first={i === 0}
+              last={i === entries.length - 1}
+              active={selectedId === e.id}
+              onSelect={() => setSelectedId(e.id)}
+              onMove={(dir: -1 | 1) => move(e, dir)}
+              onSaveNote={(note: string) => saveNote(e, note)}
+              onDelete={() => removeEntry(e)}
+              onAddRound={(form: any) => addRound(e, form)}
+              onDeleteRound={deleteRound}
+              onShareRound={(r: Round) => shareRound(e, r)}
+            />
+          ))}
+          {entries.length === 0 && (
+            <div style={{ padding: 24 }} className="muted">
+              No courses yet — add your first on the left, or use Import to paste a whole list.
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+}
+
+/* ---------------- entry row ---------------- */
+
+function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSaveNote, onDelete, onAddRound, onDeleteRound, onShareRound }: any) {
+  const [open, setOpen] = useState(false);
+  const [noteEdit, setNoteEdit] = useState<string | null>(null);
+  const [date, setDate] = useState("");
+  const [score, setScore] = useState("");
+  const [notes, setNotes] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  const onlyBlankRound =
+    rounds.length === 1 &&
+    !rounds[0].played_on && rounds[0].score == null && !rounds[0].notes && !rounds[0].scorecard_path;
+
+  const best = rounds.map((r: Round) => r.score).filter((s: any) => s != null);
+  const bestScore = best.length ? Math.min(...best) : null;
+
+  return (
+    <div>
+      <div className={`course-row ${active ? "active" : ""}`}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
+          <button className="btn-icon" disabled={first} onClick={() => onMove(-1)} title="Move up">↑</button>
+          <div className="rank-badge">{entry.rank}</div>
+          <button className="btn-icon" disabled={last} onClick={() => onMove(1)} title="Move down">↓</button>
+        </div>
+        <div className="course-main clickable" style={{ cursor: "pointer" }} onClick={() => { onSelect(); setOpen(!open); }}>
+          <div className="course-name">{entry.name}</div>
+          <div className="course-loc">{entry.location}{entry.lat == null && <span className="muted"> · no pin yet</span>}</div>
+          {noteEdit === null ? (
+            <div className="course-note">
+              {entry.note ? `“${entry.note}”` : <span className="muted">no note yet</span>}{" "}
+              <a className="rowlink" onClick={(ev) => { ev.stopPropagation(); setNoteEdit(entry.note); }}>edit</a>
+            </div>
+          ) : (
+            <div onClick={(ev) => ev.stopPropagation()} style={{ marginTop: 6 }}>
+              <textarea className="input" rows={2} value={noteEdit} onChange={(e) => setNoteEdit(e.target.value)} />
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button className="btn btn-small btn-primary" onClick={() => { onSaveNote(noteEdit); setNoteEdit(null); }}>Save note</button>
+                <button className="btn btn-small" onClick={() => setNoteEdit(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: "right", flex: "none" }}>
+          {bestScore != null && <div className="chip chip-score">best {bestScore}</div>}
+          <div className="small" style={{ marginTop: 4 }}>
+            <a className="rowlink" onClick={() => setOpen(!open)}>
+              {rounds.length} round{rounds.length === 1 ? "" : "s"} {open ? "▾" : "▸"}
+            </a>
+          </div>
+          <div className="small" style={{ marginTop: 4 }}>
+            <a className="rowlink" style={{ color: "var(--danger)" }} onClick={onDelete}>remove</a>
+          </div>
+        </div>
+      </div>
+
+      {open && (
+        <div style={{ padding: "6px 16px 16px 62px", borderBottom: "1px solid var(--border)" }}>
+          {rounds.map((r: Round) => {
+            const blank = !r.played_on && r.score == null && !r.notes && !r.scorecard_path;
+            return (
+              <div key={r.id} className="round-row">
+                {blank ? (
+                  <span className="muted" style={{ fontStyle: "italic" }}>played — no details logged yet</span>
+                ) : (
+                  <>
+                    {r.score != null && <span className="round-score">{r.score}</span>}
+                    <span className="muted">{r.played_on || "date unknown"}</span>
+                    {r.notes && <span>{r.notes}</span>}
+                    {r.scorecard_path && <ScorecardThumb path={r.scorecard_path} name={entry.name} />}
+                  </>
+                )}
+                <a className="rowlink" style={{ color: "var(--accent)", fontWeight: 600 }} onClick={() => onShareRound(r)}>📸 share</a>
+                <a className="rowlink" style={{ color: "var(--danger)" }} onClick={() => onDeleteRound(r)}>delete</a>
+              </div>
+            );
+          })}
+
+          {!showForm && (
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="btn btn-small" onClick={() => setShowForm(true)}>
+                ＋ {onlyBlankRound ? "Add round details" : "Add a new round"}
+              </button>
+            </div>
+          )}
+          {showForm && (
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              const ok = await onAddRound({ date, score, notes, file });
+              setBusy(false);
+              if (ok) { setDate(""); setScore(""); setNotes(""); setFile(null); setShowForm(false); }
+            }}
+            className="round-form"
+          >
+            <div style={{ width: 140 }}>
+              <label className="field">Date played</label>
+              <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div style={{ width: 90 }}>
+              <label className="field">Score</label>
+              <input className="input" type="number" min={18} max={300} value={score} onChange={(e) => setScore(e.target.value)} placeholder="82" />
+            </div>
+            <div style={{ flex: "1 1 160px" }}>
+              <label className="field">Notes</label>
+              <input className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Birdied 18 into the wind…" />
+            </div>
+            <div style={{ flex: "1 1 170px" }}>
+              <label className="field">Scorecard photo</label>
+              <input className="input" type="file" accept="image/*,.heic,.heif" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </div>
+            <button className="btn btn-primary btn-small" disabled={busy}>{busy ? "Saving…" : "Log round"}</button>
+            <button type="button" className="btn btn-small" onClick={() => setShowForm(false)}>Cancel</button>
+          </form>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScorecardThumb({ path, name }: { path: string; name: string }) {
+  const [zoom, setZoom] = useState(false);
+  const url = scorecardUrl(path);
+  if (!url) return null;
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={`Scorecard from ${name}`} className="scorecard-thumb" onClick={() => setZoom(true)} />
+      {zoom && (
+        <div onClick={() => setZoom(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, cursor: "zoom-out" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt="Scorecard" className="scorecard-full" style={{ maxHeight: "90vh" }} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ---------------- settings & import ---------------- */
+
+function Settings({ supabase, profile, onSaved }: any) {
+  const [title, setTitle] = useState(profile.list_title);
+  const [displayName, setDisplayName] = useState(profile.display_name);
+  const [size, setSize] = useState(profile.list_size);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="card" style={{ marginBottom: 16, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <div style={{ flex: "1 1 200px" }}>
+        <label className="field">List title</label>
+        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div style={{ flex: "1 1 140px" }}>
+        <label className="field">Display name</label>
+        <input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+      </div>
+      <div style={{ width: 120 }}>
+        <label className="field">List cap</label>
+        <select className="input" value={size} onChange={(e) => setSize(Number(e.target.value))}>
+          {[10, 25, 50, 100].map((n) => <option key={n} value={n}>Top {n}</option>)}
+        </select>
+      </div>
+      <button className="btn btn-primary btn-small" disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          await supabase.from("profiles").update({ list_title: title, display_name: displayName, list_size: size }).eq("id", profile.id);
+          setBusy(false);
+          onSaved();
+        }}>
+        Save settings
+      </button>
+    </div>
+  );
+}
+</file>
+
+<file path="app/login/page.tsx">
+"use client";
+import { useState } from "react";
+import { getBrowserClient } from "@/lib/supabase/client";
+import { SITE_NAME } from "@/lib/config";
+
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const supabase = getBrowserClient();
+
+  if (!supabase) {
+    return (
+      <main className="container" style={{ paddingTop: 48 }}>
+        <div className="card" style={{ maxWidth: 460 }}>
+          <b>Not connected yet.</b>
+          <p className="small muted">
+            Supabase environment variables aren&rsquo;t set, so sign-in is disabled in this
+            preview. Follow SETUP.md to connect the database, then this page goes live.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  async function sendLink(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    const { error } = await supabase!.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+    });
+    setBusy(false);
+    if (error) setError(error.message);
+    else setSent(true);
+  }
+
+  return (
+    <main className="container" style={{ paddingTop: 48 }}>
+      <div className="card" style={{ maxWidth: 460 }}>
+        <h1 style={{ marginTop: 0, fontSize: 24 }}>Sign in to {SITE_NAME}</h1>
+        {sent ? (
+          <p>
+            <b>Check your email.</b>
+            <br />
+            <span className="small muted">
+              We sent a sign-in link to {email}. Click it on this device and you&rsquo;ll be
+              signed in — no password needed.
+            </span>
+          </p>
+        ) : (
+          <form onSubmit={sendLink}>
+            <p className="small muted" style={{ marginTop: 0 }}>
+              No passwords — we email you a magic sign-in link. New here? Same box; your
+              account is created on first sign-in.
+            </p>
+            <label className="field" htmlFor="email">Email</label>
+            <input
+              id="email"
+              className="input"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+            />
+            {error && <p className="error-text">{error}</p>}
+            <button className="btn btn-primary" disabled={busy} style={{ marginTop: 14 }}>
+              {busy ? "Sending…" : "Email me a sign-in link"}
+            </button>
+          </form>
+        )}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/onboarding/page.tsx">
+"use client";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { getBrowserClient } from "@/lib/supabase/client";
+import PasteImport from "@/components/PasteImport";
+
+export default function OnboardingPage() {
+  const router = useRouter();
+  const supabase = getBrowserClient();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [importStep, setImportStep] = useState(false);
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [listTitle, setListTitle] = useState("My Top 25 Golf Courses");
+  const [listSize, setListSize] = useState(25);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) router.replace("/login");
+      else setUserId(data.user.id);
+    });
+  }, [supabase, router]);
+
+  if (!supabase) {
+    return (
+      <main className="container" style={{ paddingTop: 48 }}>
+        <div className="card" style={{ maxWidth: 460 }}>
+          <b>Not connected yet.</b>
+          <p className="small muted">Set up Supabase first (see SETUP.md).</p>
+        </div>
+      </main>
+    );
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!userId) return;
+    const uname = username.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{2,29}$/.test(uname)) {
+      setError("Username must be 3–30 characters: lowercase letters, numbers, hyphens.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const { error } = await supabase!.from("profiles").insert({
+      id: userId,
+      username: uname,
+      display_name: displayName.trim() || uname,
+      list_title: listTitle.trim() || "My Top Courses",
+      list_size: listSize,
+    });
+    setBusy(false);
+    if (error) {
+      setError(
+        error.code === "23505" ? "That username is taken — try another." : error.message
+      );
+      return;
+    }
+    setImportStep(true); // step 2: bring your existing list
+  }
+
+  if (importStep && userId) {
+    return (
+      <main className="container" style={{ paddingTop: 48 }}>
+        <div style={{ maxWidth: 640 }}>
+          <h1 style={{ fontSize: 24, margin: "0 0 4px" }}>You&rsquo;re in! One more thing…</h1>
+          <p className="small muted" style={{ margin: "0 0 14px" }}>
+            Already keep a list of courses you&rsquo;ve played? Paste it and it becomes your
+            ranked map in one step.
+          </p>
+          <PasteImport
+            supabase={supabase!}
+            profile={{ id: userId, list_size: listSize }}
+            existingCount={0}
+            onDone={() => router.replace("/edit")}
+            onSkip={() => router.replace("/edit")}
+          />
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="container" style={{ paddingTop: 48 }}>
+      <div className="card" style={{ maxWidth: 520 }}>
+        <h1 style={{ marginTop: 0, fontSize: 24 }}>Set up your list</h1>
+        <form onSubmit={save} style={{ display: "grid", gap: 14 }}>
+          <div>
+            <label className="field" htmlFor="username">Username (your public page URL)</label>
+            <input id="username" className="input" required value={username}
+              onChange={(e) => setUsername(e.target.value)} placeholder="nate" />
+            <div className="small muted" style={{ marginTop: 4 }}>
+              Your list will live at /u/{username.trim().toLowerCase() || "username"}
+            </div>
+          </div>
+          <div>
+            <label className="field" htmlFor="displayName">Display name</label>
+            <input id="displayName" className="input" value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)} placeholder="Nate" />
+          </div>
+          <div>
+            <label className="field" htmlFor="listTitle">List title</label>
+            <input id="listTitle" className="input" value={listTitle}
+              onChange={(e) => setListTitle(e.target.value)} />
+          </div>
+          <div>
+            <label className="field" htmlFor="listSize">List size</label>
+            <select id="listSize" className="input" value={listSize}
+              onChange={(e) => setListSize(Number(e.target.value))}>
+              {[10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>Top {n}</option>
+              ))}
+            </select>
+            <div className="small muted" style={{ marginTop: 4 }}>
+              You can rank fewer while you work up to it — this is just the cap.
+            </div>
+          </div>
+          {error && <p className="error-text" style={{ margin: 0 }}>{error}</p>}
+          <div>
+            <button className="btn btn-primary" disabled={busy}>
+              {busy ? "Saving…" : "Create my list"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/u/[username]/page.tsx">
+import { notFound } from "next/navigation";
+import { getServerClient, scorecardPublicUrl } from "@/lib/supabase/server";
+import PublicList, { type PublicRound } from "@/components/PublicList";
+import type { Entry, Round } from "@/lib/types";
+
+export const dynamic = "force-dynamic";
+
+export default async function UserPage({ params }: { params: { username: string } }) {
+  const supabase = getServerClient();
+  if (!supabase) {
+    return (
+      <main className="container" style={{ paddingTop: 48 }}>
+        <div className="card" style={{ maxWidth: 460 }}>
+          <b>Not connected yet.</b>
+          <p className="small muted">Set up Supabase first (see SETUP.md), then user pages go live.</p>
+        </div>
+      </main>
+    );
+  }
+
+  const username = params.username.toLowerCase();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id, username, display_name, list_title, list_size")
+    .eq("username", username)
+    .maybeSingle();
+  if (!profile) notFound();
+
+  const { data: entries } = await supabase
+    .from("entries")
+    .select("*")
+    .eq("user_id", profile.id)
+    .order("rank", { ascending: true });
+
+  const { data: rounds } = await supabase
+    .from("rounds")
+    .select("*")
+    .eq("user_id", profile.id)
+    .order("played_on", { ascending: false });
+
+  const roundsByEntry: Record<string, PublicRound[]> = {};
+  (rounds || []).forEach((r: Round) => {
+    (roundsByEntry[r.entry_id] ||= []).push({
+      ...r,
+      scorecard_url: scorecardPublicUrl(r.scorecard_path),
+    });
+  });
+
+  return (
+    <PublicList
+      title={profile.list_title}
+      ownerName={profile.display_name || profile.username}
+      entries={(entries || []) as Entry[]}
+      roundsByEntry={roundsByEntry}
+    />
+  );
+}
+</file>
+
+<file path="app/globals.css">
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --surface-2: #f4f3ef;
+  --sea: #dde7ea;
+  --text-primary: #14130f;
+  --text-secondary: #52514e;
+  --text-muted: #8a887f;
+  --accent: #14684a;
+  --accent-hover: #0f533c;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(20, 104, 74, 0.08);
+  --danger: #b3352c;
+  --border: #e3e1d9;
+  --shadow: 0 1px 3px rgba(20, 19, 15, 0.08), 0 4px 14px rgba(20, 19, 15, 0.06);
+  --pin-ring: #fcfcfb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --surface-2: #232322;
+    --sea: #171e20;
+    --text-primary: #f4f3ee;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8b8a80;
+    --accent: #2fa87c;
+    --accent-ink: #0c1310;
+    --accent-soft: rgba(47, 168, 124, 0.14);
+    --danger: #e66760;
+    --border: #33342f;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.3);
+    --pin-ring: #1a1a19;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--surface);
+  color: var(--text-primary);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.serif { font-family: Georgia, "Times New Roman", serif; }
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+.site-header {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 0;
+}
+.site-header .container { display: flex; align-items: center; gap: 16px; }
+.logo { font-family: Georgia, serif; font-size: 20px; font-weight: 700; color: var(--text-primary); }
+.logo:hover { text-decoration: none; }
+.header-spacer { flex: 1; }
+
+h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 600; }
+
+.btn {
+  display: inline-block;
+  font: 600 14px/1 inherit;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 9px 18px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { background: var(--surface-2); text-decoration: none; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+.btn-small { padding: 5px 12px; font-size: 13px; }
+.btn-danger { color: var(--danger); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn-icon {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  width: 26px; height: 26px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.btn-icon:hover { background: var(--surface-2); }
+.btn-icon:disabled { opacity: 0.35; cursor: default; }
+
+.input, textarea.input, select.input {
+  font: 14px/1.4 inherit;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 12px;
+  width: 100%;
+}
+.input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+label.field { display: block; font-size: 13px; color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+.chip {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 11px;
+  white-space: nowrap;
+}
+.chip-score { color: var(--accent); font-weight: 700; }
+
+.muted { color: var(--text-muted); }
+.small { font-size: 13px; }
+.error-text { color: var(--danger); font-size: 13.5px; }
+.success-text { color: var(--accent); font-size: 13.5px; }
+
+/* ranked list rows */
+.rank-badge {
+  flex: none;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13.5px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.course-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--border);
+}
+.course-row.clickable { cursor: pointer; }
+.course-row.clickable:hover { background: var(--surface-2); }
+.course-row.active { background: var(--accent-soft); border-left-color: var(--accent); }
+.course-main { flex: 1; min-width: 0; }
+.course-name { font-weight: 600; font-size: 15px; }
+.course-loc { color: var(--text-secondary); font-size: 13px; }
+.course-note { color: var(--text-muted); font-size: 13px; font-style: italic; margin-top: 3px; }
+
+/* rounds */
+.round-row {
+  display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+  padding: 8px 0; border-top: 1px dashed var(--border);
+  font-size: 13.5px;
+}
+.round-score { font-weight: 700; color: var(--accent); font-size: 15px; }
+.scorecard-thumb {
+  display: block;
+  max-width: 260px; max-height: 170px;
+  border-radius: 8px; border: 1px solid var(--border);
+  object-fit: cover; cursor: zoom-in;
+}
+.scorecard-full { max-width: 100%; border-radius: 10px; border: 1px solid var(--border); }
+
+/* map pins (leaflet divIcon) */
+.pin { background: transparent; border: none; }
+.pin span {
+  display: flex;
+  width: 26px; height: 26px;
+  border-radius: 50% 50% 50% 4px;
+  transform: rotate(-45deg);
+  background: var(--accent);
+  border: 2px solid var(--pin-ring);
+  box-shadow: var(--shadow);
+  align-items: center; justify-content: center;
+}
+.pin span i {
+  transform: rotate(45deg);
+  font-style: normal;
+  color: var(--accent-ink);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.pin.hl span { background: var(--text-primary); }
+.pin.hl span i { color: var(--surface); }
+
+.leaflet-container { font: inherit; background: var(--sea); border-radius: 14px; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--surface); color: var(--text-primary);
+  box-shadow: var(--shadow); border-radius: 10px;
+}
+.popup-rank { color: var(--accent); font-weight: 700; font-size: 12.5px; letter-spacing: 0.4px; }
+.popup-name { font-weight: 600; font-size: 15px; }
+.popup-loc { color: var(--text-secondary); font-size: 13px; }
+@media (prefers-color-scheme: dark) {
+  .leaflet-layer { filter: brightness(0.85) contrast(0.95); }
+  .leaflet-control-attribution { background: rgba(26, 26, 25, 0.7); color: var(--text-muted); }
+}
+
+/* two-pane public layout */
+.list-layout { display: flex; gap: 20px; align-items: flex-start; }
+.list-map { flex: 1.25; position: sticky; top: 16px; min-width: 0; }
+.list-pane { flex: 1; min-width: 340px; }
+@media (max-width: 880px) {
+  .list-layout { flex-direction: column; }
+  .list-map { position: static; width: 100%; }
+  .list-pane { min-width: 0; width: 100%; }
+}
+
+.footer-note {
+  border-top: 1px solid var(--border);
+  margin-top: 40px; padding: 16px 0 28px;
+  color: var(--text-muted); font-size: 12.5px;
+}
+
+/* ---------- mobile optimization ---------- */
+
+.action-bar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.action-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.round-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; margin-top: 10px; }
+.rowlink { cursor: pointer; font-size: 12px; }
+
+@media (max-width: 820px) {
+  /* 16px inputs stop iOS Safari's auto-zoom on focus */
+  .input, textarea.input, select.input { font-size: 16px; }
+
+  /* header: title stays put, buttons become a swipeable strip */
+  .action-strip {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+    margin-left: -24px; margin-right: -24px;
+    padding-left: 24px; padding-right: 24px;
+  }
+  .action-strip::-webkit-scrollbar { display: none; }
+  .action-strip .btn { flex: none; }
+
+  /* comfortable tap targets */
+  .btn { padding: 10px 16px; }
+  .btn-small { padding: 9px 14px; font-size: 14px; }
+  .btn-icon { width: 36px; height: 36px; font-size: 16px; border-radius: 9px; }
+  .rowlink { font-size: 14px; padding: 6px 2px; display: inline-block; }
+
+  /* map takes ~38% of screen so the list is one flick away */
+  .edit-map-wrap > div:first-child { height: 38vh !important; }
+
+  /* forms stack full-width */
+  .form-grid { grid-template-columns: 1fr; }
+  .round-form > div { width: 100% !important; flex: 1 1 100% !important; }
+  .round-form button { width: 100%; padding: 12px; }
+
+  .course-row { padding: 12px 12px; gap: 10px; }
+  h1 { font-size: 24px; }
+}
+</file>
+
+<file path="app/layout.tsx">
+import "./globals.css";
+import "leaflet/dist/leaflet.css";
+import type { Metadata, Viewport } from "next";
+import Link from "next/link";
+import { SITE_NAME, TAGLINE } from "@/lib/config";
+
+export const metadata: Metadata = {
+  title: SITE_NAME,
+  description: TAGLINE,
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: { title: SITE_NAME },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#14684a" },
+    { media: "(prefers-color-scheme: dark)", color: "#1a1a19" },
+  ],
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <header className="site-header">
+          <div className="container">
+            <Link href="/" className="logo">
+              ⛳ {SITE_NAME}
+            </Link>
+            <div className="header-spacer" />
+            <Link href="/demo" className="btn btn-small">Demo</Link>
+            <Link href="/edit" className="btn btn-small">My list</Link>
+            <Link href="/login" className="btn btn-small btn-primary">Sign in</Link>
+          </div>
+        </header>
+        {children}
+        <footer className="footer-note">
+          <div className="container">
+            {SITE_NAME} — {TAGLINE} · Map data © OpenStreetMap contributors, © CARTO
+          </div>
+        </footer>
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="app/page.tsx">
+import Link from "next/link";
+import { SITE_NAME, TAGLINE } from "@/lib/config";
+
+export default function Home() {
+  return (
+    <main className="container" style={{ paddingTop: 56, paddingBottom: 40 }}>
+      <div style={{ maxWidth: 640 }}>
+        <h1 style={{ fontSize: 40, margin: "0 0 12px" }}>
+          Your courses. Your ranks. <span style={{ color: "var(--accent)" }}>Your cards.</span>
+        </h1>
+        <p style={{ fontSize: 17, color: "var(--text-secondary)", margin: "0 0 8px" }}>
+          {SITE_NAME} is where golfers keep their own ranked list of every great course
+          they&rsquo;ve played — on an interactive map, with the scores they actually shot
+          and photos of the scorecards to prove it.
+        </p>
+        <p className="muted" style={{ margin: "0 0 28px" }}>
+          Not a critics&rsquo; list. Yours.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <Link href="/login" className="btn btn-primary">Start your list</Link>
+          <Link href="/demo" className="btn">See a real top 25</Link>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 56 }}>
+        {[
+          ["🗺️", "Map every round", "Every course you rank gets a numbered pin on your personal world map."],
+          ["🏌️", "Rank what you played", "Top 10, 25, or 100 — your list, your order, with a note for every course."],
+          ["✍️", "Post the proof", "Log each round with the date and score, and upload a photo of the scorecard."],
+          ["🔗", "Share it", "Every list gets a public page you can send to your group chat."],
+        ].map(([icon, title, body]) => (
+          <div key={title} className="card" style={{ flex: "1 1 220px" }}>
+            <div style={{ fontSize: 26 }}>{icon}</div>
+            <div style={{ fontWeight: 700, margin: "8px 0 4px" }}>{title}</div>
+            <div className="small" style={{ color: "var(--text-secondary)" }}>{body}</div>
+          </div>
+        ))}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="components/CourseMap.tsx">
+"use client";
+import { useEffect, useRef } from "react";
+import type { Map as LeafletMap, Marker } from "leaflet";
+
+export type MapPoint = {
+  id: string;
+  rank: number;
+  name: string;
+  location: string;
+  lat: number | null;
+  lng: number | null;
+};
+
+type Props = {
+  points: MapPoint[];
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
+  height?: number | string;
+};
+
+export default function CourseMap({ points, selectedId, onSelect, height = 520 }: Props) {
+  const divRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markersRef = useRef<Record<string, Marker>>({});
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  // (Re)build markers whenever points change.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (cancelled || !divRef.current) return;
+
+      if (!mapRef.current) {
+        mapRef.current = L.map(divRef.current, { worldCopyJump: true, scrollWheelZoom: true });
+        mapRef.current.attributionControl?.setPrefix(false);
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "© OpenStreetMap contributors",
+        }).addTo(mapRef.current);
+      }
+      const map = mapRef.current;
+
+      Object.values(markersRef.current).forEach((m) => m.remove());
+      markersRef.current = {};
+
+      const located = points.filter((p) => p.lat != null && p.lng != null);
+      located.forEach((p) => {
+        const icon = L.divIcon({
+          className: "pin",
+          html: `<span><i>${p.rank}</i></span>`,
+          iconSize: [26, 26],
+          iconAnchor: [4, 24],
+          popupAnchor: [9, -24],
+        });
+        const m = L.marker([p.lat!, p.lng!], { icon, title: `#${p.rank} ${p.name}`, riseOnHover: true })
+          .addTo(map)
+          .bindPopup(
+            `<div class="popup-rank">RANKED #${p.rank}</div>` +
+              `<div class="popup-name">${escapeHtml(p.name)}</div>` +
+              `<div class="popup-loc">${escapeHtml(p.location)}</div>`
+          );
+        m.on("click", () => onSelectRef.current?.(p.id));
+        markersRef.current[p.id] = m;
+      });
+
+      if (located.length > 0) {
+        map.fitBounds(
+          L.latLngBounds(located.map((p) => [p.lat!, p.lng!] as [number, number])),
+          { padding: [40, 40] }
+        );
+      } else {
+        map.setView([30, -20], 2);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [points]);
+
+  // Highlight + fly to selection.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    Object.entries(markersRef.current).forEach(([id, m]) => {
+      const el = m.getElement();
+      if (el) el.classList.toggle("hl", id === selectedId);
+    });
+    if (selectedId && markersRef.current[selectedId]) {
+      const m = markersRef.current[selectedId];
+      map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 11), { duration: 0.7 });
+      m.openPopup();
+    }
+  }, [selectedId]);
+
+  useEffect(() => {
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  return <div ref={divRef} style={{ height, width: "100%", borderRadius: 14 }} />;
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string)
+  );
+}
+</file>
+
+<file path="components/PasteImport.tsx">
+"use client";
+import { useRef, useState } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { parseCourseList, type ParsedCourse } from "@/lib/importParse";
+
+type DbMatch = { id: string | null; name: string; location: string; address: string };
+
+type Row = ParsedCourse & {
+  include: boolean;
+  match: DbMatch | null;       // chosen match (null = keep as typed)
+  alternatives: DbMatch[];     // other candidates from the search
+  lat: number | null;
+  lng: number | null;
+};
+
+type Props = {
+  supabase: SupabaseClient;
+  profile: { id: string; list_size: number };
+  existingCount: number;
+  onDone: () => void;
+  onSkip?: () => void; // present in onboarding: renders a skip link
+};
+
+const geocodeCache: Record<string, { lat: number; lng: number } | null> = {};
+
+async function geocodeTown(q: string): Promise<{ lat: number; lng: number } | null> {
+  const key = q.trim().toLowerCase();
+  if (!key) return null;
+  if (key in geocodeCache) return geocodeCache[key];
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`
+    );
+    const results = await res.json();
+    geocodeCache[key] =
+      results.length > 0
+        ? { lat: Number(Number(results[0].lat).toFixed(5)), lng: Number(Number(results[0].lon).toFixed(5)) }
+        : null;
+  } catch {
+    geocodeCache[key] = null;
+  }
+  return geocodeCache[key];
+}
+
+export default function PasteImport({ supabase, profile, existingCount, onDone, onSkip }: Props) {
+  const [step, setStep] = useState<"paste" | "matching" | "review" | "importing">("paste");
+  const [text, setText] = useState("");
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [rows, setRows] = useState<Row[]>([]);
+  const [replace, setReplace] = useState(false);
+  const [err, setErr] = useState("");
+  const cancelled = useRef(false);
+
+  async function startMatching() {
+    setErr("");
+    const parsed = parseCourseList(text);
+    if (parsed.length === 0) {
+      setErr("Couldn't find any course names in that — try pasting one course per line.");
+      return;
+    }
+    cancelled.current = false;
+    setStep("matching");
+    setProgress({ done: 0, total: parsed.length });
+
+    const built: Row[] = [];
+    for (let i = 0; i < parsed.length; i++) {
+      if (cancelled.current) return;
+      const p = parsed[i];
+      let match: DbMatch | null = null;
+      let alternatives: DbMatch[] = [];
+      try {
+        const res = await fetch(`/api/courses/search?q=${encodeURIComponent(p.name)}`);
+        const data = await res.json();
+        if (data?.courses?.length) {
+          const candidates: DbMatch[] = data.courses;
+          // If the pasted line had a location, prefer a candidate that mentions part of it.
+          const locToken = p.location.split(",")[0].trim().toLowerCase();
+          const preferred =
+            locToken.length > 2
+              ? candidates.find((c) => c.location.toLowerCase().includes(locToken))
+              : null;
+          match = preferred || candidates[0];
+          alternatives = candidates.filter((c) => c !== match).slice(0, 5);
+        }
+      } catch {
+        /* leave unmatched */
+      }
+      // Pin: town center of the best location we know (match's town beats pasted text).
+      const town = (match ? match.location : "") || p.location;
+      const pin = town ? await geocodeTown(town) : null;
+      built.push({
+        ...p,
+        include: true,
+        match,
+        alternatives,
+        lat: pin?.lat ?? null,
+        lng: pin?.lng ?? null,
+      });
+      setProgress({ done: i + 1, total: parsed.length });
+    }
+    setRows(built);
+    setStep("review");
+  }
+
+  async function chooseMatch(idx: number, m: DbMatch | null) {
+    const next = [...rows];
+    const row = { ...next[idx], match: m };
+    const town = (m ? m.location : "") || row.location;
+    const pin = town ? await geocodeTown(town) : null;
+    row.lat = pin?.lat ?? null;
+    row.lng = pin?.lng ?? null;
+    next[idx] = row;
+    setRows(next);
+  }
+
+  async function runImport() {
+    const chosen = rows.filter((r) => r.include);
+    if (chosen.length === 0) return;
+    setStep("importing");
+    setErr("");
+    try {
+      if (replace) {
+        await supabase.from("entries").delete().eq("user_id", profile.id);
+      }
+      const base = replace ? 0 : existingCount;
+      const room = Math.max(0, profile.list_size - base);
+      const toInsert = chosen.slice(0, room);
+
+      const entryRows = toInsert.map((r, i) => ({
+        user_id: profile.id,
+        rank: base + i + 1,
+        name: r.match ? r.match.name : r.name,
+        location: r.match ? r.match.location : r.location,
+        lat: r.lat,
+        lng: r.lng,
+        note: r.note,
+      }));
+      const { data: created, error } = await supabase.from("entries").insert(entryRows).select("id");
+      if (error) throw error;
+
+      // Every imported course counts as played — starter round, with score if we found one.
+      if (created && created.length > 0) {
+        await supabase.from("rounds").insert(
+          created.map((row: { id: string }, i: number) => ({
+            user_id: profile.id,
+            entry_id: row.id,
+            score: toInsert[i]?.score ?? null,
+            notes: "",
+          }))
+        );
+      }
+      if (chosen.length > room) {
+        // Imported what fit; the caller's page will show the cap message naturally.
+      }
+      onDone();
+    } catch (e: any) {
+      setErr(e?.message || "Import failed — nothing was saved. Try again.");
+      setStep("review");
+    }
+  }
+
+  /* ---------------- render ---------------- */
+
+  if (step === "paste" || step === "matching") {
+    const matching = step === "matching";
+    return (
+      <div className="card">
+        <b>Bring your list with you</b>
+        <p className="small muted" style={{ margin: "4px 0 10px" }}>
+          Paste your top-courses list from anywhere — the Notes app, a Google Sheet, a text
+          to your buddies. Numbered or not. We&rsquo;ll match each line against 30,000 courses.
+        </p>
+        <textarea
+          className="input"
+          rows={8}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={"1. Pebble Beach — unreal back nine\n2. Pinehurst No. 2\n3. Whistling Straits\n…"}
+          disabled={matching}
+        />
+        {err && <p className="error-text" style={{ marginBottom: 0 }}>{err}</p>}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+          <button
+            className="btn btn-primary btn-small"
+            onClick={startMatching}
+            disabled={matching || text.trim().length < 3}
+          >
+            {matching ? `Matching ${progress.done} of ${progress.total}…` : "Find my courses"}
+          </button>
+          {matching && (
+            <button className="btn btn-small" onClick={() => { cancelled.current = true; setStep("paste"); }}>
+              Cancel
+            </button>
+          )}
+          <div className="header-spacer" />
+          {onSkip && !matching && (
+            <a onClick={onSkip} style={{ cursor: "pointer" }} className="small">
+              Skip — I&rsquo;ll add courses one at a time →
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const included = rows.filter((r) => r.include).length;
+  const room = Math.max(0, profile.list_size - (replace ? 0 : existingCount));
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ padding: "14px 16px 10px" }}>
+        <b>Check the matches</b>
+        <p className="small muted" style={{ margin: "4px 0 0" }}>
+          {rows.filter((r) => r.match).length} of {rows.length} matched to the course database.
+          Fix anything that looks off, untick what you don&rsquo;t want, then import.
+        </p>
+      </div>
+
+      <div style={{ maxHeight: 420, overflowY: "auto", borderTop: "1px solid var(--border)" }}>
+        {rows.map((r, i) => (
+          <div key={i} className="course-row" style={{ alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={r.include}
+              onChange={(e) => {
+                const next = [...rows];
+                next[i] = { ...r, include: e.target.checked };
+                setRows(next);
+              }}
+              style={{ flex: "none" }}
+            />
+            <div className="rank-badge" style={{ opacity: r.include ? 1 : 0.35 }}>{i + 1}</div>
+            <div className="course-main" style={{ opacity: r.include ? 1 : 0.45 }}>
+              {r.match ? (
+                <>
+                  <div className="course-name" style={{ fontSize: 14 }}>
+                    {r.match.name} <span style={{ color: "var(--accent)" }}>✓</span>
+                  </div>
+                  <div className="course-loc">{r.match.location}</div>
+                </>
+              ) : (
+                <>
+                  <div className="course-name" style={{ fontSize: 14 }}>
+                    {r.name} <span className="muted small">(as typed — no database match)</span>
+                  </div>
+                  <div className="course-loc">{r.location || (r.lat ? "" : "no map pin yet")}</div>
+                </>
+              )}
+              {(r.alternatives.length > 0 || r.match) && (
+                <select
+                  className="input"
+                  style={{ marginTop: 4, fontSize: 12, padding: "3px 8px", width: "auto", maxWidth: "100%" }}
+                  value={r.match ? "m" : "t"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "t") chooseMatch(i, null);
+                    else if (v === "m") { /* current */ }
+                    else chooseMatch(i, r.alternatives[Number(v)]);
+                  }}
+                >
+                  {r.match && <option value="m">{r.match.name} — {r.match.location}</option>}
+                  {r.alternatives.map((a, ai) => (
+                    <option key={ai} value={ai}>{a.name} — {a.location}</option>
+                  ))}
+                  <option value="t">Keep as I typed it: “{r.name}”</option>
+                </select>
+              )}
+              {r.note && <div className="course-note">“{r.note}”</div>}
+            </div>
+            <div style={{ textAlign: "right", flex: "none" }}>
+              {r.score != null && <span className="chip chip-score">shot {r.score}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        {existingCount > 0 && (
+          <label className="small" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+            Replace my current list (otherwise adds below it)
+          </label>
+        )}
+        {included > room && (
+          <span className="small error-text">
+            Only room for {room} more (your cap is Top {profile.list_size}) — the first {room} will import.
+          </span>
+        )}
+        {err && <span className="error-text small">{err}</span>}
+        <div className="header-spacer" />
+        <button className="btn btn-small" onClick={() => setStep("paste")}>← Back</button>
+        <button
+          className="btn btn-primary btn-small"
+          onClick={runImport}
+          disabled={step === "importing" || included === 0}
+        >
+          {step === "importing" ? "Importing…" : `Add ${Math.min(included, room)} course${Math.min(included, room) === 1 ? "" : "s"} to my list`}
+        </button>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="components/PublicList.tsx">
+"use client";
+import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import type { Entry, Round } from "@/lib/types";
+
+const CourseMap = dynamic(() => import("./CourseMap"), { ssr: false });
+
+export type PublicRound = Round & { scorecard_url: string | null };
+
+type Props = {
+  title: string;
+  ownerName: string;
+  entries: Entry[];
+  roundsByEntry: Record<string, PublicRound[]>;
+  demoBanner?: boolean;
+};
+
+export default function PublicList({ title, ownerName, entries, roundsByEntry, demoBanner }: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  const points = useMemo(
+    () => entries.map((e) => ({ id: e.id, rank: e.rank, name: e.name, location: e.location, lat: e.lat, lng: e.lng })),
+    [entries]
+  );
+
+  const totalRounds = Object.values(roundsByEntry).reduce((n, r) => n + r.length, 0);
+  const cardCount = Object.values(roundsByEntry)
+    .flat()
+    .filter((r) => r.scorecard_url).length;
+
+  function bestScore(id: string): number | null {
+    const scores = (roundsByEntry[id] || []).map((r) => r.score).filter((s): s is number => s != null);
+    return scores.length ? Math.min(...scores) : null;
+  }
+
+  function select(id: string) {
+    setSelectedId(id);
+    setExpanded((x) => ({ ...x, [id]: true }));
+    document.getElementById(`entry-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  return (
+    <main className="container" style={{ paddingTop: 24 }}>
+      {demoBanner && (
+        <div className="chip" style={{ display: "inline-block", marginBottom: 12 }}>
+          Demo list — sign in to build your own
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 14, flexWrap: "wrap", marginBottom: 6 }}>
+        <h1 style={{ fontSize: 30, margin: 0 }}>{title}</h1>
+        <span className="muted">by {ownerName}</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+        <span className="chip">{entries.length} courses</span>
+        <span className="chip">{totalRounds} rounds logged</span>
+        <span className="chip">{cardCount} scorecards</span>
+      </div>
+
+      <div className="list-layout">
+        <div className="list-map">
+          <CourseMap points={points} selectedId={selectedId} onSelect={select} height="min(70vh, 640px)" />
+        </div>
+        <div className="list-pane card" style={{ padding: 0, overflow: "hidden" }}>
+          {entries.map((e) => {
+            const rounds = roundsByEntry[e.id] || [];
+            const best = bestScore(e.id);
+            const isOpen = !!expanded[e.id];
+            return (
+              <div key={e.id} id={`entry-${e.id}`}>
+                <div
+                  className={`course-row clickable ${selectedId === e.id ? "active" : ""}`}
+                  onClick={() => {
+                    setSelectedId(e.id);
+                    setExpanded((x) => ({ ...x, [e.id]: !isOpen }));
+                  }}
+                >
+                  <div className="rank-badge">{e.rank}</div>
+                  <div className="course-main">
+                    <div className="course-name">{e.name}</div>
+                    <div className="course-loc">{e.location}</div>
+                    {e.note && <div className="course-note">&ldquo;{e.note}&rdquo;</div>}
+                  </div>
+                  <div style={{ textAlign: "right", flex: "none" }}>
+                    {best != null && <div className="chip chip-score">best {best}</div>}
+                    <div className="small muted" style={{ marginTop: 4 }}>
+                      {rounds.length > 0 ? `${rounds.length} round${rounds.length > 1 ? "s" : ""} ${isOpen ? "▾" : "▸"}` : ""}
+                    </div>
+                  </div>
+                </div>
+                {isOpen && rounds.length > 0 && (
+                  <div style={{ padding: "4px 16px 14px 60px" }}>
+                    {rounds.map((r) => (
+                      <div key={r.id} className="round-row">
+                        {!r.played_on && r.score == null && !r.notes && !r.scorecard_url ? (
+                          <span className="muted" style={{ fontStyle: "italic" }}>played</span>
+                        ) : null}
+                        {r.score != null && <span className="round-score">{r.score}</span>}
+                        {(r.played_on || r.score != null || r.notes || r.scorecard_url) && (
+                          <span className="muted">{r.played_on || "date unknown"}</span>
+                        )}
+                        {r.notes && <span>{r.notes}</span>}
+                        {r.scorecard_url && (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            src={r.scorecard_url}
+                            alt={`Scorecard from ${e.name}`}
+                            className="scorecard-thumb"
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setLightbox(r.scorecard_url);
+                            }}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {entries.length === 0 && (
+            <div style={{ padding: 24 }} className="muted">No courses ranked yet.</div>
+          )}
+        </div>
+      </div>
+
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 2000,
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 24, cursor: "zoom-out",
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="Scorecard" className="scorecard-full" style={{ maxHeight: "90vh" }} />
+        </div>
+      )}
+    </main>
+  );
+}
+</file>
+
+<file path="data/nate-top25.json">
+[
+  { "rank": 1, "name": "Shinnecock Hills Golf Club", "location": "Southampton, New York", "lat": 40.8919, "lng": -72.4416, "note": "" },
+  { "rank": 2, "name": "Royal County Down (Championship)", "location": "Newcastle, Northern Ireland", "lat": 54.216, "lng": -5.889, "note": "" },
+  { "rank": 3, "name": "Pebble Beach Golf Links", "location": "Pebble Beach, California", "lat": 36.5681, "lng": -121.9497, "note": "" },
+  { "rank": 4, "name": "Royal Portrush (Dunluce)", "location": "Portrush, Northern Ireland", "lat": 55.202, "lng": -6.636, "note": "" },
+  { "rank": 5, "name": "Ballybunion (Old Course)", "location": "Ballybunion, Co. Kerry, Ireland", "lat": 52.5085, "lng": -9.675, "note": "" },
+  { "rank": 6, "name": "Peachtree Golf Club", "location": "Atlanta, Georgia", "lat": 33.8745, "lng": -84.3375, "note": "" },
+  { "rank": 7, "name": "Sleepy Hollow Country Club", "location": "Briarcliff Manor, New York", "lat": 41.129, "lng": -73.852, "note": "" },
+  { "rank": 8, "name": "Friar's Head", "location": "Baiting Hollow, New York", "lat": 40.9605, "lng": -72.744, "note": "" },
+  { "rank": 9, "name": "Whistling Straits (Straits)", "location": "Kohler, Wisconsin", "lat": 43.851, "lng": -87.733, "note": "" },
+  { "rank": 10, "name": "Myopia Hunt Club", "location": "South Hamilton, Massachusetts", "lat": 42.608, "lng": -70.875, "note": "" },
+  { "rank": 11, "name": "Tralee Golf Club", "location": "Barrow, Co. Kerry, Ireland", "lat": 52.28, "lng": -9.861, "note": "" },
+  { "rank": 12, "name": "Somerset Hills Country Club", "location": "Bernardsville, New Jersey", "lat": 40.716, "lng": -74.582, "note": "" },
+  { "rank": 13, "name": "Pinehurst No. 2", "location": "Pinehurst, North Carolina", "lat": 35.1898, "lng": -79.47, "note": "" },
+  { "rank": 14, "name": "The Ocean Course, Kiawah Island", "location": "Kiawah Island, South Carolina", "lat": 32.609, "lng": -80.037, "note": "" },
+  { "rank": 15, "name": "Winged Foot (West)", "location": "Mamaroneck, New York", "lat": 40.96, "lng": -73.758, "note": "" },
+  { "rank": 16, "name": "Pacific Dunes", "location": "Bandon, Oregon", "lat": 43.193, "lng": -124.396, "note": "" },
+  { "rank": 17, "name": "Ohoopee Match Club", "location": "Cobbtown, Georgia", "lat": 32.32, "lng": -82.166, "note": "" },
+  { "rank": 18, "name": "Bethpage (Black)", "location": "Farmingdale, New York", "lat": 40.744, "lng": -73.455, "note": "" },
+  { "rank": 19, "name": "The Creek", "location": "Locust Valley, New York", "lat": 40.907, "lng": -73.569, "note": "" },
+  { "rank": 20, "name": "Hollywood Golf Club", "location": "Deal, New Jersey", "lat": 40.248, "lng": -74.008, "note": "" },
+  { "rank": 21, "name": "Hudson National Golf Club", "location": "Croton-on-Hudson, New York", "lat": 41.225, "lng": -73.907, "note": "" },
+  { "rank": 22, "name": "St Patrick's Links (Rosapenna)", "location": "Downings, Co. Donegal, Ireland", "lat": 55.192, "lng": -7.818, "note": "" },
+  { "rank": 23, "name": "Pinehurst No. 4", "location": "Pinehurst, North Carolina", "lat": 35.1935, "lng": -79.474, "note": "" },
+  { "rank": 24, "name": "Portstewart Golf Club (Strand)", "location": "Portstewart, Northern Ireland", "lat": 55.174, "lng": -6.729, "note": "" },
+  { "rank": 25, "name": "Waterville Golf Links", "location": "Waterville, Co. Kerry, Ireland", "lat": 51.828, "lng": -10.179, "note": "" }
+]
+</file>
+
+<file path="lib/supabase/client.ts">
+"use client";
+import { createBrowserClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+let client: SupabaseClient | null | undefined;
+
+/** Returns null when Supabase env vars are not configured (e.g. local preview). */
+export function getBrowserClient(): SupabaseClient | null {
+  if (client !== undefined) return client;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  client = url && key ? createBrowserClient(url, key) : null;
+  return client;
+}
+
+export function scorecardUrl(path: string | null): string | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!path || !url) return null;
+  return `${url}/storage/v1/object/public/scorecards/${path}`;
+}
+</file>
+
+<file path="lib/supabase/server.ts">
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** Server-side client bound to the request cookies. Returns null when env is not configured. */
+export function getServerClient(): SupabaseClient | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  const cookieStore = cookies();
+  return createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          );
+        } catch {
+          // Called from a Server Component — safe to ignore when middleware refreshes sessions.
+        }
+      },
+    },
+  });
+}
+
+export function scorecardPublicUrl(path: string | null): string | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!path || !url) return null;
+  return `${url}/storage/v1/object/public/scorecards/${path}`;
+}
+</file>
+
+<file path="lib/config.ts">
+// Change the site name / tagline here — one place, used everywhere.
+export const SITE_NAME = "Coursebook";
+export const TAGLINE = "Rank the courses you've played. Prove it with the card.";
+</file>
+
+<file path="lib/importParse.ts">
+// Tolerant parser for pasted course lists — Notes app text, Google Sheets/Excel
+// paste (tab-separated), numbered lists, bullets, with optional notes and scores.
+
+export type ParsedCourse = {
+  rank: number | null;
+  name: string;
+  location: string;
+  note: string;
+  score: number | null;
+};
+
+const HEADER_WORDS = new Set([
+  "rank", "no", "no.", "#", "course", "courses", "course name", "name",
+  "location", "town", "city", "state", "country", "score", "best", "best score",
+  "notes", "note", "played", "date",
+]);
+
+function isHeaderLine(cells: string[]): boolean {
+  const filled = cells.filter((c) => c.trim().length > 0);
+  if (filled.length === 0) return true;
+  const headerish = filled.filter((c) => HEADER_WORDS.has(c.trim().toLowerCase()));
+  return headerish.length >= Math.max(1, Math.ceil(filled.length * 0.6));
+}
+
+function isTitleLine(line: string): boolean {
+  return /^(my\s+)?top\s*\d*\s*(golf\s*)?(courses?|list)?[:!]?$/i.test(line.trim());
+}
+
+/** Strip leading list markers: "1.", "12)", "#3", "-", "•", "*", "1 -" */
+function stripMarker(line: string): { rank: number | null; rest: string } {
+  const m = line.match(/^\s*(?:[#]?(\d{1,3})\s*[.):\-–]?\s+|[-•*]\s+)(.*)$/);
+  if (m) {
+    return { rank: m[1] ? parseInt(m[1], 10) : null, rest: m[2].trim() };
+  }
+  return { rank: null, rest: line.trim() };
+}
+
+function looksLikeScore(s: string): number | null {
+  const n = Number(s.trim());
+  if (Number.isInteger(n) && n >= 50 && n <= 150) return n;
+  return null;
+}
+
+function looksLikeLocation(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  // "Town, ST" / "Town, State" / contains a comma / a known-ish region word
+  return /,/.test(t) || /\b(ireland|scotland|england|wales|usa|united states)\b/i.test(t);
+}
+
+/** Split "Course name - some comment" into name + note (conservative). */
+function splitNote(rest: string): { name: string; note: string } {
+  // Trailing parenthetical → note: "Pebble Beach (best round ever)"
+  const paren = rest.match(/^(.{3,}?)\s*\(([^)]{2,})\)\s*$/);
+  if (paren && !/course|links|club|no\.?\s*\d/i.test(paren[2])) {
+    return { name: paren[1].trim(), note: paren[2].trim() };
+  }
+  // " - " separator (spaces required, so "Pinehurst No-2" style names survive)
+  const dash = rest.split(/\s+[-–—]\s+/);
+  if (dash.length >= 2 && dash[0].trim().length >= 3) {
+    return { name: dash[0].trim(), note: dash.slice(1).join(" — ").trim() };
+  }
+  return { name: rest.trim(), note: "" };
+}
+
+function parseDelimitedLine(cells: string[]): ParsedCourse | null {
+  let rank: number | null = null;
+  let score: number | null = null;
+  let name = "";
+  let location = "";
+  const extras: string[] = [];
+
+  for (const raw of cells) {
+    const cell = raw.trim();
+    if (!cell) continue;
+    const asNum = Number(cell);
+    if (rank === null && Number.isInteger(asNum) && asNum >= 1 && asNum <= 500 && !name) {
+      rank = asNum; // leading small number before the name = rank
+      continue;
+    }
+    if (score === null && looksLikeScore(cell) && name) {
+      score = Number(cell);
+      continue;
+    }
+    if (!name) {
+      name = cell;
+      continue;
+    }
+    if (!location && looksLikeLocation(cell)) {
+      location = cell;
+      continue;
+    }
+    extras.push(cell);
+  }
+  if (!name) return null;
+  const { name: n, note: inlineNote } = splitNote(name);
+  const note = [inlineNote, ...extras].filter(Boolean).join(" — ");
+  return { rank, name: n, location, note, score };
+}
+
+export function parseCourseList(text: string): ParsedCourse[] {
+  const out: ParsedCourse[] = [];
+  const lines = text.split(/\r?\n/).slice(0, 300);
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    if (isTitleLine(line)) continue;
+
+    // Spreadsheet paste: tab-separated. Also accept 2+ consecutive spaces as columns.
+    const cells = line.includes("\t") ? line.split("\t") : null;
+    if (cells) {
+      if (isHeaderLine(cells)) continue;
+      const parsed = parseDelimitedLine(cells);
+      if (parsed) out.push(parsed);
+      continue;
+    }
+
+    const { rank, rest } = stripMarker(line);
+    if (!rest) continue;
+    if (isHeaderLine([rest])) continue;
+
+    // Plain line: name [- note]; a trailing ", Town, ST" chunk stays in the name —
+    // the course-database match will supply the canonical location anyway.
+    const { name, note } = splitNote(rest);
+    // Trailing bare score: "Pebble Beach 84"
+    const scoreMatch = name.match(/^(.{3,}?)\s+(\d{2,3})$/);
+    let finalName = name;
+    let score: number | null = null;
+    if (scoreMatch && looksLikeScore(scoreMatch[2]) !== null && !/no\.?\s*\d+$/i.test(name)) {
+      finalName = scoreMatch[1].trim();
+      score = Number(scoreMatch[2]);
+    }
+    out.push({ rank, name: finalName, location: "", note, score });
+  }
+
+  // If no explicit ranks were present, rank by order of appearance.
+  const anyRanks = out.some((c) => c.rank !== null);
+  out.forEach((c, i) => {
+    if (c.rank === null) c.rank = anyRanks ? i + 1 : i + 1;
+  });
+  out.sort((a, b) => (a.rank as number) - (b.rank as number));
+  // De-dup identical names (keeps first/highest-ranked occurrence).
+  const seen = new Set<string>();
+  return out.filter((c) => {
+    const k = c.name.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+</file>
+
+<file path="lib/storyCard.ts">
+// Renders a 1080x1920 Instagram-Story-sized share card on a canvas.
+// Pure client-side; returns a PNG blob. No external assets except the
+// scorecard photo (loaded with CORS from Supabase public storage).
+
+export type StoryCardData = {
+  rank: number;
+  listTitle: string;      // "Nate's Top 50"
+  courseName: string;
+  location: string;
+  playedOn: string | null; // "2026-08-07"
+  score: number | null;
+  note?: string;
+  photoUrl: string | null; // scorecard photo (public URL) or null
+  siteName?: string;       // "Coursebook"
+};
+
+const W = 1080;
+const H = 1920;
+
+// Palette (matches the site)
+const INK = "#14130f";
+const CREAM = "#fcfcfb";
+const CREAM2 = "#f4f3ef";
+const GREEN = "#14684a";
+const GREEN_DARK = "#0d4733";
+const MUTED = "#8a887f";
+const BORDER = "#e3e1d9";
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso + "T12:00:00");
+    return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  } catch {
+    return iso;
+  }
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, startPx: number, minPx: number, font: (px: number) => string): number {
+  let px = startPx;
+  ctx.font = font(px);
+  while (ctx.measureText(text).width > maxWidth && px > minPx) {
+    px -= 4;
+    ctx.font = font(px);
+  }
+  return px;
+}
+
+export async function renderStoryCard(data: StoryCardData): Promise<Blob> {
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  const serif = (px: number) => `600 ${px}px Georgia, "Times New Roman", serif`;
+  const serifBold = (px: number) => `700 ${px}px Georgia, "Times New Roman", serif`;
+  const sans = (px: number) => `500 ${px}px -apple-system, "Helvetica Neue", Arial, sans-serif`;
+  const sansBold = (px: number) => `700 ${px}px -apple-system, "Helvetica Neue", Arial, sans-serif`;
+
+  // ---- background: deep green with subtle vertical tone shift ----
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, GREEN_DARK);
+  bg.addColorStop(0.5, GREEN);
+  bg.addColorStop(1, GREEN_DARK);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // faint contour rings (golf-green vibe)
+  ctx.strokeStyle = "rgba(252,252,251,0.06)";
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 7; i++) {
+    ctx.beginPath();
+    ctx.ellipse(W / 2, H - 180, 200 + i * 130, 90 + i * 60, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // ---- safe margins: keep content within y 250..1670 ----
+  const M = 84; // side margin
+  const cardX = M, cardW = W - M * 2;
+
+  // ---- cream content card ----
+  const cardY = 280, cardH = 1330;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetY = 16;
+  roundRect(ctx, cardX, cardY, cardW, cardH, 36);
+  ctx.fillStyle = CREAM;
+  ctx.fill();
+  ctx.restore();
+
+  // ---- rank badge overlapping card top ----
+  const badgeR = 110;
+  const badgeCX = W / 2, badgeCY = cardY + 10;
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.3)";
+  ctx.shadowBlur = 24;
+  ctx.beginPath();
+  ctx.arc(badgeCX, badgeCY, badgeR, 0, Math.PI * 2);
+  ctx.fillStyle = GREEN;
+  ctx.fill();
+  ctx.restore();
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = CREAM;
+  ctx.beginPath();
+  ctx.arc(badgeCX, badgeCY, badgeR, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = CREAM;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const rankText = `#${data.rank}`;
+  const rankPx = fitText(ctx, rankText, badgeR * 1.5, 96, 56, serifBold);
+  ctx.font = serifBold(rankPx);
+  ctx.fillText(rankText, badgeCX, badgeCY + 6);
+
+  // ---- list title above card, below badge? -> under badge inside card ----
+  let y = cardY + badgeR + 70;
+  ctx.fillStyle = MUTED;
+  ctx.font = sansBold(34);
+  ctx.fillText(data.listTitle.toUpperCase(), W / 2, y);
+  y += 84;
+
+  // ---- course name ----
+  ctx.fillStyle = INK;
+  const namePx = fitText(ctx, data.courseName, cardW - 120, 92, 52, serif);
+  ctx.font = serif(namePx);
+  // wrap to 2 lines if needed even after shrink
+  const words = data.courseName.split(" ");
+  if (ctx.measureText(data.courseName).width > cardW - 120 && words.length > 1) {
+    const mid = Math.ceil(words.length / 2);
+    const l1 = words.slice(0, mid).join(" ");
+    const l2 = words.slice(mid).join(" ");
+    ctx.fillText(l1, W / 2, y);
+    y += namePx + 14;
+    ctx.fillText(l2, W / 2, y);
+  } else {
+    ctx.fillText(data.courseName, W / 2, y);
+  }
+  y += 74;
+
+  // ---- location ----
+  ctx.fillStyle = MUTED;
+  const locPx = fitText(ctx, data.location, cardW - 160, 40, 28, sans);
+  ctx.font = sans(locPx);
+  ctx.fillText(data.location, W / 2, y);
+  y += 80;
+
+  // ---- photo (polaroid) or fallback flag art ----
+  const photoAreaH = 620;
+  if (data.photoUrl) {
+    try {
+      const img = await loadImage(data.photoUrl);
+      const frameW = cardW - 160;
+      const frameH = photoAreaH;
+      const frameX = (W - frameW) / 2;
+      const frameY = y;
+      ctx.save();
+      ctx.translate(W / 2, frameY + frameH / 2);
+      ctx.rotate(-0.015);
+      ctx.translate(-W / 2, -(frameY + frameH / 2));
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.25)";
+      ctx.shadowBlur = 30;
+      ctx.shadowOffsetY = 10;
+      ctx.fillStyle = "#ffffff";
+      roundRect(ctx, frameX, frameY, frameW, frameH, 12);
+      ctx.fill();
+      ctx.restore();
+      const pad = 22;
+      const iw = frameW - pad * 2;
+      const ih = frameH - pad * 2 - 40;
+      const scale = Math.max(iw / img.width, ih / img.height);
+      const sw = iw / scale, sh = ih / scale;
+      const sx = (img.width - sw) / 2, sy = (img.height - sh) / 2;
+      ctx.save();
+      roundRect(ctx, frameX + pad, frameY + pad, iw, ih, 8);
+      ctx.clip();
+      ctx.drawImage(img, sx, sy, sw, sh, frameX + pad, frameY + pad, iw, ih);
+      ctx.restore();
+      ctx.fillStyle = MUTED;
+      ctx.font = sans(26);
+      ctx.fillText("the proof ⛳", W / 2, frameY + frameH - 26);
+      ctx.restore();
+    } catch {
+      drawFlagArt(ctx, y, photoAreaH);
+    }
+  } else {
+    drawFlagArt(ctx, y, photoAreaH);
+  }
+  y += photoAreaH + 88;
+
+  // ---- date + score row ----
+  const dateStr = fmtDate(data.playedOn);
+  const hasScore = data.score != null;
+  if (hasScore) {
+    ctx.fillStyle = MUTED;
+    ctx.font = sansBold(30);
+    ctx.fillText(dateStr ? `PLAYED ${dateStr.toUpperCase()}` : "ROUND LOGGED", W / 2, y);
+    y += 96;
+    ctx.fillStyle = GREEN;
+    ctx.font = serifBold(150);
+    const scoreStr = String(data.score);
+    ctx.fillText(scoreStr, W / 2, y + 10);
+    const sw2 = ctx.measureText(scoreStr).width;
+    ctx.fillStyle = MUTED;
+    ctx.font = sans(34);
+    ctx.textAlign = "left";
+    ctx.fillText("shot", W / 2 - sw2 / 2 - 90, y + 8);
+    ctx.textAlign = "center";
+    y += 90;
+  } else {
+    ctx.fillStyle = MUTED;
+    ctx.font = sansBold(30);
+    ctx.fillText(dateStr ? `PLAYED ${dateStr.toUpperCase()}` : "", W / 2, y + 20);
+    y += 110;
+  }
+
+  // ---- footer branding on green ----
+  ctx.fillStyle = CREAM;
+  ctx.font = serifBold(44);
+  ctx.fillText(`⛳ ${data.siteName || "Coursebook"}`, W / 2, cardY + cardH + 96);
+  ctx.fillStyle = "rgba(252,252,251,0.75)";
+  ctx.font = sans(28);
+  ctx.fillText("rank the courses you've played", W / 2, cardY + cardH + 150);
+
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b!), "image/png"));
+}
+
+function drawFlagArt(ctx: CanvasRenderingContext2D, y: number, h: number) {
+  // Simple flag-on-green illustration when there's no photo.
+  const cx = W / 2, base = y + h - 60;
+  ctx.save();
+  ctx.fillStyle = CREAM2;
+  roundRect(ctx, (W - (W - 244)) / 2, y, W - 244, h, 12);
+  ctx.fill();
+  ctx.strokeStyle = BORDER;
+  ctx.lineWidth = 2;
+  roundRect(ctx, (W - (W - 244)) / 2, y, W - 244, h, 12);
+  ctx.stroke();
+  // green mound
+  ctx.fillStyle = "#cfe0d5";
+  ctx.beginPath();
+  ctx.ellipse(cx, base, 300, 70, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // hole
+  ctx.fillStyle = "#5a6e63";
+  ctx.beginPath();
+  ctx.ellipse(cx + 60, base - 6, 26, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // pole
+  ctx.strokeStyle = "#8a887f";
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(cx + 60, base - 10);
+  ctx.lineTo(cx + 60, y + 110);
+  ctx.stroke();
+  // flag
+  ctx.fillStyle = GREEN;
+  ctx.beginPath();
+  ctx.moveTo(cx + 64, y + 110);
+  ctx.lineTo(cx + 234, y + 152);
+  ctx.lineTo(cx + 64, y + 194);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+</file>
+
+<file path="lib/types.ts">
+export type Profile = {
+  id: string;
+  username: string;
+  display_name: string;
+  list_title: string;
+  list_size: number;
+};
+
+export type Entry = {
+  id: string;
+  user_id: string;
+  rank: number;
+  name: string;
+  location: string;
+  lat: number | null;
+  lng: number | null;
+  note: string;
+};
+
+export type Round = {
+  id: string;
+  user_id: string;
+  entry_id: string;
+  played_on: string | null;
+  score: number | null;
+  notes: string;
+  scorecard_path: string | null;
+  created_at?: string;
+};
+</file>
+
+<file path="public/manifest.webmanifest">
+{
+  "name": "Coursebook",
+  "short_name": "Coursebook",
+  "description": "Rank the courses you've played. Prove it with the card.",
+  "start_url": "/edit",
+  "display": "browser",
+  "background_color": "#fcfcfb",
+  "theme_color": "#14684a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
+</file>
+
+<file path="supabase/schema.sql">
+-- Coursebook schema. Run this once in the Supabase SQL editor (Dashboard -> SQL -> New query -> paste -> Run).
+
+-- ============ TABLES ============
+
+create table if not exists public.profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
+  username text not null unique check (username ~ '^[a-z0-9][a-z0-9-]{2,29}$'),
+  display_name text not null default '',
+  list_title text not null default 'My Top Courses',
+  list_size int not null default 25 check (list_size between 1 and 200),
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  rank int not null check (rank >= 1),
+  name text not null,
+  location text not null default '',
+  lat double precision,
+  lng double precision,
+  note text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists entries_user_rank on public.entries (user_id, rank);
+
+create table if not exists public.rounds (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  entry_id uuid not null references public.entries (id) on delete cascade,
+  played_on date,
+  score int check (score between 18 and 300),
+  notes text not null default '',
+  scorecard_path text,
+  created_at timestamptz not null default now()
+);
+create index if not exists rounds_entry on public.rounds (entry_id);
+create index if not exists rounds_user on public.rounds (user_id);
+
+-- ============ ROW LEVEL SECURITY ============
+-- Everyone can view lists (public, shareable pages); only the owner can change their own data.
+
+alter table public.profiles enable row level security;
+alter table public.entries  enable row level security;
+alter table public.rounds   enable row level security;
+
+create policy "profiles are viewable by everyone" on public.profiles for select using (true);
+create policy "users insert own profile" on public.profiles for insert with check (auth.uid() = id);
+create policy "users update own profile" on public.profiles for update using (auth.uid() = id);
+
+create policy "entries are viewable by everyone" on public.entries for select using (true);
+create policy "users insert own entries" on public.entries for insert with check (auth.uid() = user_id);
+create policy "users update own entries" on public.entries for update using (auth.uid() = user_id);
+create policy "users delete own entries" on public.entries for delete using (auth.uid() = user_id);
+
+create policy "rounds are viewable by everyone" on public.rounds for select using (true);
+create policy "users insert own rounds" on public.rounds for insert with check (auth.uid() = user_id);
+create policy "users update own rounds" on public.rounds for update using (auth.uid() = user_id);
+create policy "users delete own rounds" on public.rounds for delete using (auth.uid() = user_id);
+
+-- ============ SCORECARD IMAGE STORAGE ============
+-- Public-read bucket; each user can only write inside their own folder (scorecards/<their-user-id>/...).
+
+insert into storage.buckets (id, name, public)
+values ('scorecards', 'scorecards', true)
+on conflict (id) do nothing;
+
+create policy "scorecards are publicly readable"
+  on storage.objects for select
+  using (bucket_id = 'scorecards');
+
+create policy "users upload own scorecards"
+  on storage.objects for insert
+  with check (bucket_id = 'scorecards' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "users update own scorecards"
+  on storage.objects for update
+  using (bucket_id = 'scorecards' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "users delete own scorecards"
+  on storage.objects for delete
+  using (bucket_id = 'scorecards' and (storage.foldername(name))[1] = auth.uid()::text);
+</file>
+
+<file path=".env.example">
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR-ANON-PUBLIC-KEY
+</file>
+
+<file path=".gitignore">
+node_modules
+.next
+.env.local
+next-env.d.ts
+</file>
+
+<file path="middleware.ts">
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
+
+export async function middleware(request: NextRequest) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  let response = NextResponse.next({ request });
+  if (!url || !key) return response;
+
+  const supabase = createServerClient(url, key, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+        response = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) =>
+          response.cookies.set(name, value, options)
+        );
+      },
+    },
+  });
+
+  // Keep the auth session fresh.
+  await supabase.auth.getUser();
+  return response;
+}
+
+export const config = {
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+};
+</file>
+
+<file path="next.config.mjs">
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  images: { unoptimized: true }
+};
+export default nextConfig;
+</file>
+
+<file path="package.json">
+{
+  "name": "coursebook",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.0",
+    "heic2any": "^0.0.4",
+    "leaflet": "^1.9.4",
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.12",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="README.md">
+# Coursebook
+
+Rank the courses you've played. Prove it with the card.
+
+A web app where golfers sign in, build a ranked list of the top courses they've
+played (top 10/25/50/100), see them as numbered pins on an interactive map, log
+every round with the score they shot, and upload photos of their scorecards.
+Every list gets a public, shareable page.
+
+**Unlike critics' rankings (top100golfcourses.com etc.), this is personal:
+your list, your order, your scores, your scorecards.**
+
+## Stack
+
+- Next.js 14 (App Router) — the website, deployed on Vercel
+- Supabase — sign-in (email magic links), Postgres database, scorecard image storage
+- Leaflet + OpenStreetMap/CARTO — the interactive maps
+- No other services; runs entirely on free tiers
+
+## Getting it live
+
+See **SETUP.md** — three free accounts, ~30 minutes, no coding.
+
+## Project layout
+
+- `app/` — pages: landing, login, onboarding, `edit` (your list builder), `u/[username]` (public pages), `demo`
+- `components/CourseMap.tsx` — the Leaflet map with numbered rank pins
+- `components/PublicList.tsx` — the shared public list + map + scorecards view
+- `supabase/schema.sql` — database tables, security rules, storage bucket (run once in Supabase)
+- `data/nate-top25.json` — starter list, importable from the edit page
+- `lib/config.ts` — site name + tagline (rename the product here)
+
+## Local development
+
+```
+npm install
+cp .env.example .env.local   # fill in your Supabase URL + anon key
+npm run dev
+```
+
+Without env vars the app still runs: landing and `/demo` work; sign-in and
+lists show a "not connected" notice.
+</file>
+
+<file path="SETUP.md">
+# Putting Coursebook live — step by step
+
+You'll create three free accounts (GitHub, Supabase, Vercel). No coding needed; total time is about 30 minutes. When you're done you'll have a real website with sign-in, and it costs $0 on the free tiers.
+
+**What each piece does:** GitHub stores the code. Supabase is the database — it handles sign-ins, everyone's lists, and scorecard photos. Vercel runs the website itself.
+
+## Step 1 — Put the code on GitHub
+
+1. Go to github.com and sign up (free).
+2. Click the **+** in the top right → **New repository**. Name it `coursebook`, keep it **Private**, click **Create repository**.
+3. On the new repo page, click the link that says **uploading an existing file**.
+4. Unzip the `coursebook.zip` you got from Claude, then drag **the contents** of the coursebook folder (not the folder itself) into the upload area. Wait for all files to list, then click **Commit changes**.
+
+## Step 2 — Create the database (Supabase)
+
+1. Go to supabase.com → **Start your project** → sign up (free).
+2. Click **New project**. Name: `coursebook`. Pick the region closest to you (e.g. *East US*). It will generate a database password — you won't need it day-to-day, but save it somewhere.
+3. Wait a minute or two while the project provisions.
+4. In the left sidebar, open **SQL Editor** → **New query**. Open the file `supabase/schema.sql` from the project, paste its entire contents in, and click **Run**. You should see "Success. No rows returned." This creates the tables, the security rules, and the scorecard photo storage.
+5. Go to **Project Settings** (gear icon) → **API**. Keep this tab open — you'll need two values in the next step:
+   - **Project URL** (looks like `https://abcd1234.supabase.co`)
+   - **anon public** key (a long string under "Project API keys")
+
+## Step 3 — Launch the website (Vercel)
+
+1. Go to vercel.com → sign up → choose **Continue with GitHub** (this links the two accounts).
+2. Click **Add New… → Project**. You'll see your `coursebook` repo — click **Import**.
+3. It auto-detects Next.js. Before deploying, expand **Environment Variables** and add both of these (from the Supabase tab you kept open):
+   - Name: `NEXT_PUBLIC_SUPABASE_URL` → Value: your Project URL
+   - Name: `NEXT_PUBLIC_SUPABASE_ANON_KEY` → Value: the anon public key
+4. Click **Deploy**. In about a minute you'll get your live URL, like `https://coursebook-xyz.vercel.app`.
+
+## Step 4 — Tell Supabase your website's address
+
+This makes the emailed sign-in links point to your real site.
+
+1. Back in Supabase: **Authentication → URL Configuration**.
+2. Set **Site URL** to your Vercel URL (e.g. `https://coursebook-xyz.vercel.app`).
+3. Under **Redirect URLs**, add: `https://coursebook-xyz.vercel.app/auth/callback`
+
+## Step 5 — Sign in and import your top 25
+
+1. Visit your site → **Sign in** → enter your email → click the link that arrives.
+2. Pick your username (e.g. `nate`), display name, and list title.
+3. On your list page, click **Import**, and paste the contents of `data/nate-top25.json` (also sent to you as a separate file). Your 25 courses appear, mapped and ranked.
+4. Click any course → **Log round** to add a date, score, and scorecard photo.
+5. **Copy share link** and send your page to anyone — theirs is one sign-up away.
+
+## Good to know
+
+- **Sign-in email limits:** Supabase's built-in email sender is limited to roughly 2–4 emails per hour — fine for you and early testers. Before inviting lots of people, add a custom SMTP sender (Supabase: Authentication → Emails → SMTP settings; Resend.com has a free tier) — ask Claude to walk you through it.
+- **Renaming the site:** the name and tagline live in `lib/config.ts`. Edit that file on GitHub (pencil icon), commit, and Vercel redeploys automatically.
+- **A custom domain** (like coursebook.golf) can be attached later in Vercel → Settings → Domains for the cost of the domain itself.
+- **Updating the code:** any file you change in the GitHub repo redeploys the site automatically. Ask Claude for new features and upload the changed files the same way.
+- **Free-tier limits:** Supabase free tier includes 500 MB database + 1 GB file storage — thousands of scorecard photos. Vercel's free tier easily covers a hobby site.
+
+## Course database search (golfcourseapi.com)
+
+The "Add a course" form can search a database of ~30,000 courses. To turn it on:
+
+1. Sign in at golfcourseapi.com and copy your API key.
+2. In Vercel: Project -> Settings -> Environment Variables -> Add: Name `GOLF_COURSE_API_KEY`, Value = your key (all environments). This stays server-side — visitors never see it.
+3. Redeploy (Vercel prompts you, or push any commit).
+
+Without the key the form quietly falls back to manual entry + OpenStreetMap lookup. Note the free tier allows 50 searches/day across all users — searches only run when someone clicks Search, and identical searches are cached for a day.
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "plugins": [{ "name": "next" }],
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}
+</file>
+
+</files>
