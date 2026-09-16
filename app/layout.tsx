@@ -33,7 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="site-header">
           <div className="container">
             <Link href="/" className="logo">
-              ⛳ {SITE_NAME}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo-mark.png" alt="" className="logo-mark" />
+              {SITE_NAME}
             </Link>
             <div className="header-spacer" />
             <Link href="/demo" className="btn btn-small">Demo</Link>
