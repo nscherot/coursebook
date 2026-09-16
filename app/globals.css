@@ -85,7 +85,14 @@ a:hover { color: var(--accent-hover); text-decoration: underline; }
   z-index: 1100;
 }
 .site-header .container { display: flex; align-items: center; gap: 16px; }
-.logo { font-family: 'Newsreader', Georgia, serif; font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.logo { font-family: 'Newsreader', Georgia, serif; font-size: 22px; font-weight: 600; color: var(--text-primary); display: inline-flex; align-items: center; gap: 9px; }
+.logo-mark {
+  height: 26px; width: auto;
+  background: #fcfcfb;
+  border-radius: 7px;
+  padding: 3px 6px;
+  box-sizing: content-box;
+}
 .logo:hover { text-decoration: none; color: var(--text-primary); }
 .header-spacer { flex: 1; }
 
