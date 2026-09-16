@@ -133,6 +133,7 @@ export default function PasteImport({ supabase, profile, existingCount, onDone, 
         location: r.match ? r.match.location : r.location,
         lat: r.lat,
         lng: r.lng,
+        external_id: r.match && (r.match as any).id != null ? String((r.match as any).id) : null,
         note: r.note,
       }));
       const { data: created, error } = await supabase.from("entries").insert(entryRows).select("id");
