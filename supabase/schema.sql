@@ -89,3 +89,31 @@ alter table public.profiles
   add column if not exists home_course text,
   add column if not exists handicap    numeric(4,1)
     check (handicap is null or (handicap >= -10 and handicap <= 54));
+
+-- Canonical course link + rank history (data foundations for community insights) --
+alter table public.entries add column if not exists external_id text;
+create index if not exists entries_external on public.entries (external_id);
+
+create table if not exists public.rank_history (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  entry_id uuid not null references public.entries (id) on delete cascade,
+  rank int not null,
+  recorded_at timestamptz not null default now()
+);
+create index if not exists rank_history_entry on public.rank_history (entry_id, recorded_at);
+alter table public.rank_history enable row level security;
+create policy "rank history is viewable by everyone" on public.rank_history for select using (true);
+
+-- Trigger: snapshot every rank change automatically, whatever feature caused it.
+create or replace function public.log_rank_change() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' or new.rank is distinct from old.rank then
+    insert into public.rank_history (user_id, entry_id, rank) values (new.user_id, new.id, new.rank);
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_log_rank on public.entries;
+create trigger trg_log_rank after insert or update of rank on public.entries
+for each row execute function public.log_rank_change();
