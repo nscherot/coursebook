@@ -168,6 +168,15 @@ label.field { display: block; font-size: 13px; color: var(--text-secondary); fon
   display: flex; align-items: center; justify-content: center;
 }
 .rank-badge.rank-1 { background: var(--gold); color: #ffffff; border-color: var(--gold); }
+/* editable rank badge on the edit page */
+button.rank-badge-btn { cursor: pointer; font-family: inherit; transition: border-color 0.15s, transform 0.1s; }
+button.rank-badge-btn:hover { border-color: var(--accent); transform: scale(1.08); }
+.rank-input {
+  width: 44px !important; height: 32px;
+  padding: 2px 4px !important;
+  text-align: center; font-weight: 700; font-size: 14px !important;
+  border-radius: 8px !important;
+}
 .course-row {
   display: flex;
   gap: 14px;
