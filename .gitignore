@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+
+# next.js build output
+.next/
+out/
+next-env.d.ts
+
+# env files (never commit secrets)
+.env
+.env.local
+.env*.local
+
+# misc
+.DS_Store
+*.log
+repomix-output.xml
+_to_delete/
