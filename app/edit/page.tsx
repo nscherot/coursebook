@@ -151,21 +151,7 @@ function Editor(props: any) {
     return null;
   }
 
-  async function geocode() {
-    const q = `${newName} ${newLoc}`.trim();
-    if (!q) return;
-    setGeoBusy(true);
-    setMsg("");
-    const hit = await geocodeQuery(q);
-    if (hit) {
-      setNewLat(hit.lat);
-      setNewLng(hit.lng);
-      setMsg(`Pinned near: ${hit.label}`);
-    } else {
-      setMsg("No match found — try adding the town/state, or type coordinates manually.");
-    }
-    setGeoBusy(false);
-  }
+  // (The old manual "Find on map" flow is gone — pins resolve automatically on add.)
 
   // Debounced type-ahead: fires only after a typing pause, ≥4 chars,
   // with per-session caching and stale-response protection (quota-friendly).
@@ -250,14 +236,14 @@ function Editor(props: any) {
       if (h && nearTown(h)) { hit = h; break; }
     }
     if (!hit && townHit) {
-      hit = { ...townHit, label: `${townHit.label} (town center — nudge the pin if needed)` };
+      hit = { ...townHit, label: `${townHit.label} (town center)` };
     }
     if (hit) {
       setNewLat(hit.lat);
       setNewLng(hit.lng);
       setMsg(`Selected ${c.name} — pinned near ${hit.label}`);
     } else {
-      setMsg(`Selected ${c.name} — couldn't find map coordinates automatically; use Find on map or type them.`);
+      setMsg(`Selected ${c.name} — it'll be pinned automatically when you add it.`);
     }
     setGeoBusy(false);
   }
@@ -270,6 +256,19 @@ function Editor(props: any) {
       return;
     }
     setAddBusy(true);
+    // Resolve a map pin automatically if the dropdown didn't already provide one.
+    let lat = newLat ? Number(newLat) : null;
+    let lng = newLng ? Number(newLng) : null;
+    if (lat == null || lng == null) {
+      const q = `${newName} ${newLoc}`.trim();
+      const hit =
+        (q ? await geocodeQuery(q) : null) ||
+        (newLoc.trim() ? await geocodeQuery(newLoc.trim()) : null);
+      if (hit) {
+        lat = Number(hit.lat);
+        lng = Number(hit.lng);
+      }
+    }
     // Optional target rank: insert there and bump everything below; default is the end.
     const endRank = entries.length + 1;
     const parsed = newRank.trim() === "" ? endRank : Math.round(Number(newRank));
@@ -289,8 +288,8 @@ function Editor(props: any) {
         rank: target,
         name: newName.trim(),
         location: newLoc.trim(),
-        lat: newLat ? Number(newLat) : null,
-        lng: newLng ? Number(newLng) : null,
+        lat,
+        lng,
         note: "",
       })
       .select("id")
@@ -577,17 +576,6 @@ function Editor(props: any) {
               </div>
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <button type="button" className="btn btn-small" onClick={geocode} disabled={geoBusy}>
-                {geoBusy ? "Looking up…" : "📍 Find on map"}
-              </button>
-              <div style={{ width: 110 }}>
-                <label className="field">Lat</label>
-                <input className="input" value={newLat} onChange={(e) => setNewLat(e.target.value)} placeholder="40.89" />
-              </div>
-              <div style={{ width: 110 }}>
-                <label className="field">Lng</label>
-                <input className="input" value={newLng} onChange={(e) => setNewLng(e.target.value)} placeholder="-72.44" />
-              </div>
               <div style={{ width: 90 }}>
                 <label className="field">Rank</label>
                 <input
@@ -614,7 +602,7 @@ function Editor(props: any) {
             <div className="small muted">
               {dbConfigured
                 ? "Start typing a course name (4+ letters) and pick from the dropdown — even partial or misspelled names match, and the location and map pin fill in automatically. "
-                : "“Find on map” uses OpenStreetMap search — it gets most courses; nudge the numbers if the pin is off. "}
+                : "The map pin is found automatically from the course name and town when you add it. "}
               Set the Rank field to drop it straight into a spot on your list — blank means it lands at the bottom, and you can always click any rank number to move it later.
             </div>
           </form>
