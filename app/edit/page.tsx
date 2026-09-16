@@ -122,6 +122,7 @@ function Editor(props: any) {
   const [newLat, setNewLat] = useState<string>("");
   const [newLng, setNewLng] = useState<string>("");
   const [newRank, setNewRank] = useState<string>("");
+  const [newExtId, setNewExtId] = useState<string>(""); // golfcourseapi id — links entries to a canonical course
   const [geoBusy, setGeoBusy] = useState(false);
   const [addBusy, setAddBusy] = useState(false);
   const [dbResults, setDbResults] = useState<any[] | null>(null);
@@ -157,6 +158,7 @@ function Editor(props: any) {
   // with per-session caching and stale-response protection (quota-friendly).
   function onNameChange(value: string) {
     setNewName(value);
+    setNewExtId(""); // manual edits break the canonical-course link
     if (!dbConfigured) return;
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const q = value.trim().toLowerCase();
@@ -204,6 +206,7 @@ function Editor(props: any) {
     searchSeq.current++; // invalidate any in-flight search
     setNewName(c.name);
     setNewLoc(c.location || "");
+    setNewExtId(c.id != null ? String(c.id) : "");
     setDbResults(null);
     setDbOpen(false);
     setDbBusy(false);
@@ -290,6 +293,7 @@ function Editor(props: any) {
         location: newLoc.trim(),
         lat,
         lng,
+        external_id: newExtId || null,
         note: "",
       })
       .select("id")
@@ -301,7 +305,7 @@ function Editor(props: any) {
     setAddBusy(false);
     if (error) setMsg(error.message);
     else {
-      setNewName(""); setNewLoc(""); setNewLat(""); setNewLng(""); setNewRank("");
+      setNewName(""); setNewLoc(""); setNewLat(""); setNewLng(""); setNewRank(""); setNewExtId("");
       setMsg("");
       reload();
     }
