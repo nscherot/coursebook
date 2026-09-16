@@ -310,6 +310,24 @@ function Editor(props: any) {
     ]);
   }
 
+  // Jump a course straight to a target rank; everything between shifts by one.
+  async function moveTo(entry: Entry, target: number) {
+    const clamped = Math.max(1, Math.min(entries.length, Math.round(target)));
+    const idx = entries.findIndex((e: Entry) => e.id === entry.id);
+    if (idx === -1 || !Number.isFinite(clamped) || clamped === entry.rank) return;
+    const oldRanks: Record<string, number> = {};
+    entries.forEach((e: Entry) => { oldRanks[e.id] = e.rank; });
+    const reordered = [...entries];
+    reordered.splice(idx, 1);
+    reordered.splice(clamped - 1, 0, entry);
+    const renumbered = reordered.map((e: Entry, i: number) => ({ ...e, rank: i + 1 }));
+    setEntries(renumbered);
+    const changed = renumbered.filter((e: Entry) => oldRanks[e.id] !== e.rank);
+    await Promise.all(
+      changed.map((e: Entry) => supabase.from("entries").update({ rank: e.rank }).eq("id", e.id))
+    );
+  }
+
   async function saveNote(entry: Entry, note: string) {
     setEntries(entries.map((e: Entry) => (e.id === entry.id ? { ...e, note } : e)));
     await supabase.from("entries").update({ note }).eq("id", entry.id);
@@ -565,7 +583,7 @@ function Editor(props: any) {
               {dbConfigured
                 ? "Start typing a course name (4+ letters) and pick from the dropdown — even partial or misspelled names match, and the location and map pin fill in automatically. "
                 : "“Find on map” uses OpenStreetMap search — it gets most courses; nudge the numbers if the pin is off. "}
-              New courses land at the bottom; use the arrows to move them up.
+              New courses land at the bottom; click any rank number to type where it belongs.
             </div>
           </form>
         </div>
@@ -581,6 +599,8 @@ function Editor(props: any) {
               active={selectedId === e.id}
               onSelect={() => setSelectedId(e.id)}
               onMove={(dir: -1 | 1) => move(e, dir)}
+              onMoveTo={(n: number) => moveTo(e, n)}
+              total={entries.length}
               onSaveNote={(note: string) => saveNote(e, note)}
               onDelete={() => removeEntry(e)}
               onAddRound={(form: any) => addRound(e, form)}
@@ -601,7 +621,7 @@ function Editor(props: any) {
 
 /* ---------------- entry row ---------------- */
 
-function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSaveNote, onDelete, onAddRound, onDeleteRound, onShareRound }: any) {
+function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onMoveTo, total, onSaveNote, onDelete, onAddRound, onDeleteRound, onShareRound }: any) {
   const [open, setOpen] = useState(false);
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
   const [date, setDate] = useState("");
@@ -610,6 +630,15 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [rankEdit, setRankEdit] = useState<string | null>(null);
+
+  function commitRank() {
+    if (rankEdit !== null) {
+      const n = Number(rankEdit);
+      if (Number.isFinite(n) && n >= 1 && Math.round(n) !== entry.rank) onMoveTo(n);
+    }
+    setRankEdit(null);
+  }
 
   const onlyBlankRound =
     rounds.length === 1 &&
@@ -623,7 +652,30 @@ function EntryRow({ entry, rounds, first, last, active, onSelect, onMove, onSave
       <div className={`course-row ${active ? "active" : ""}`}>
         <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
           <button className="btn-icon" disabled={first} onClick={() => onMove(-1)} title="Move up">↑</button>
-          <div className={`rank-badge${entry.rank === 1 ? " rank-1" : ""}`}>{entry.rank}</div>
+          {rankEdit !== null ? (
+            <input
+              className="input rank-input"
+              autoFocus
+              inputMode="numeric"
+              value={rankEdit}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => setRankEdit(e.target.value.replace(/[^0-9]/g, ""))}
+              onBlur={commitRank}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitRank(); }
+                if (e.key === "Escape") setRankEdit(null);
+              }}
+            />
+          ) : (
+            <button
+              type="button"
+              className={`rank-badge rank-badge-btn${entry.rank === 1 ? " rank-1" : ""}`}
+              title={`Ranked #${entry.rank} of ${total} — click to type a new rank`}
+              onClick={() => setRankEdit(String(entry.rank))}
+            >
+              {entry.rank}
+            </button>
+          )}
           <button className="btn-icon" disabled={last} onClick={() => onMove(1)} title="Move down">↓</button>
         </div>
         <div className="course-main clickable" style={{ cursor: "pointer" }} onClick={() => { onSelect(); setOpen(!open); }}>
