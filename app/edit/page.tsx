@@ -121,6 +121,7 @@ function Editor(props: any) {
   const [newLoc, setNewLoc] = useState("");
   const [newLat, setNewLat] = useState<string>("");
   const [newLng, setNewLng] = useState<string>("");
+  const [newRank, setNewRank] = useState<string>("");
   const [geoBusy, setGeoBusy] = useState(false);
   const [addBusy, setAddBusy] = useState(false);
   const [dbResults, setDbResults] = useState<any[] | null>(null);
@@ -269,11 +270,23 @@ function Editor(props: any) {
       return;
     }
     setAddBusy(true);
+    // Optional target rank: insert there and bump everything below; default is the end.
+    const endRank = entries.length + 1;
+    const parsed = newRank.trim() === "" ? endRank : Math.round(Number(newRank));
+    const target = Number.isFinite(parsed) ? Math.max(1, Math.min(endRank, parsed)) : endRank;
+    if (target < endRank) {
+      const bumped = entries.filter((e: Entry) => e.rank >= target);
+      await Promise.all(
+        bumped.map((e: Entry) =>
+          supabase.from("entries").update({ rank: e.rank + 1 }).eq("id", e.id)
+        )
+      );
+    }
     const { data: created, error } = await supabase
       .from("entries")
       .insert({
         user_id: profile.id,
-        rank: entries.length + 1,
+        rank: target,
         name: newName.trim(),
         location: newLoc.trim(),
         lat: newLat ? Number(newLat) : null,
@@ -289,7 +302,7 @@ function Editor(props: any) {
     setAddBusy(false);
     if (error) setMsg(error.message);
     else {
-      setNewName(""); setNewLoc(""); setNewLat(""); setNewLng("");
+      setNewName(""); setNewLoc(""); setNewLat(""); setNewLng(""); setNewRank("");
       setMsg("");
       reload();
     }
@@ -575,15 +588,34 @@ function Editor(props: any) {
                 <label className="field">Lng</label>
                 <input className="input" value={newLng} onChange={(e) => setNewLng(e.target.value)} placeholder="-72.44" />
               </div>
+              <div style={{ width: 90 }}>
+                <label className="field">Rank</label>
+                <input
+                  className="input"
+                  value={newRank}
+                  onChange={(e) => setNewRank(e.target.value.replace(/[^0-9]/g, ""))}
+                  inputMode="numeric"
+                  placeholder={`#${entries.length + 1}`}
+                  title="Where it lands on your list — leave blank for the end"
+                />
+              </div>
               <button className="btn btn-primary btn-small" disabled={addBusy || !newName.trim()}>
-                {addBusy ? "Adding…" : `Add at #${entries.length + 1}`}
+                {addBusy
+                  ? "Adding…"
+                  : `Add at #${(() => {
+                      const end = entries.length + 1;
+                      const n = Math.round(Number(newRank));
+                      return newRank.trim() !== "" && Number.isFinite(n)
+                        ? Math.max(1, Math.min(end, n))
+                        : end;
+                    })()}`}
               </button>
             </div>
             <div className="small muted">
               {dbConfigured
                 ? "Start typing a course name (4+ letters) and pick from the dropdown — even partial or misspelled names match, and the location and map pin fill in automatically. "
                 : "“Find on map” uses OpenStreetMap search — it gets most courses; nudge the numbers if the pin is off. "}
-              New courses land at the bottom; click any rank number to type where it belongs.
+              Set the Rank field to drop it straight into a spot on your list — blank means it lands at the bottom, and you can always click any rank number to move it later.
             </div>
           </form>
         </div>
