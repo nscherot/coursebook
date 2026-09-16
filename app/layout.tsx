@@ -4,6 +4,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { SITE_NAME, TAGLINE } from "@/lib/config";
 import HeaderAuth from "@/components/HeaderAuth";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: SITE_NAME,
@@ -46,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/terms">Terms</Link> · Map data © OpenStreetMap contributors
           </div>
         </footer>
+        <Analytics />
       </body>
     </html>
   );
